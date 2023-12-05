@@ -2,7 +2,7 @@ PROJECT_NAME     := ble_app_hrs_freertos_d52_s132
 TARGETS          := nrf52832_xxaa
 OUTPUT_DIRECTORY := _build
 
-SDK_ROOT := ../../../../../..
+SDK_ROOT := ../../../../nRF5_SDK_17.1.0_ddde560
 PROJ_DIR := ../../..
 
 $(OUTPUT_DIRECTORY)/nrf52832_xxaa.out: \
