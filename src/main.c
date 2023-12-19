@@ -61,6 +61,8 @@
 #include "ble_hrs.h"
 #include "ble_dis.h"
 #include "ble_conn_params.h"
+#include "nrf_twi_mngr.h"
+#include "lis2dh12.h"
 #include "sensorsim.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_soc.h"
@@ -133,22 +135,35 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
+#define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
+#define MAX_PENDING_TRANSACTIONS            5                                       /**< Maximal number of pending I2C transactions */
+#define BUFFER_SIZE                         MAX_PENDING_TRANSACTIONS                /**< Buffer size */
 
-BLE_BAS_DEF(m_bas);                                                 /**< Battery service instance. */
-BLE_HRS_DEF(m_hrs);                                                 /**< Heart rate service instance. */
-NRF_BLE_GATT_DEF(m_gatt);                                           /**< GATT module instance. */
-NRF_BLE_QWR_DEF(m_qwr);                                             /**< Context for the Queued Write module.*/
-BLE_ADVERTISING_DEF(m_advertising);                                 /**< Advertising module instance. */
+#define INT1 25
+#define INT2 26
+#define CS   27
+#define SA0  28
+#define SDA  29
+#define SCL  30
 
-static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
-static bool     m_rr_interval_enabled = true;                       /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
+BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
+BLE_HRS_DEF(m_hrs);                                                                 /**< Heart rate service instance. */
+NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
+NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
+BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
+NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, BUFFER_SIZE);                  /**< TWI sensor instance. */
+LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_LOW);     /**< LIS2DH12 accel instance. */
 
-static sensorsim_cfg_t   m_battery_sim_cfg;                         /**< Battery Level sensor simulator configuration. */
-static sensorsim_state_t m_battery_sim_state;                       /**< Battery Level sensor simulator state. */
-static sensorsim_cfg_t   m_heart_rate_sim_cfg;                      /**< Heart Rate sensor simulator configuration. */
-static sensorsim_state_t m_heart_rate_sim_state;                    /**< Heart Rate sensor simulator state. */
-static sensorsim_cfg_t   m_rr_interval_sim_cfg;                     /**< RR Interval sensor simulator configuration. */
-static sensorsim_state_t m_rr_interval_sim_state;                   /**< RR Interval sensor simulator state. */
+static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
+static bool     m_rr_interval_enabled = true;                                       /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
+
+static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
+static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
+static sensorsim_cfg_t   m_heart_rate_sim_cfg;                                      /**< Heart Rate sensor simulator configuration. */
+static sensorsim_state_t m_heart_rate_sim_state;                                    /**< Heart Rate sensor simulator state. */
+static sensorsim_cfg_t   m_rr_interval_sim_cfg;                                     /**< RR Interval sensor simulator configuration. */
+static sensorsim_state_t m_rr_interval_sim_state;                                   /**< RR Interval sensor simulator state. */
 
 static ble_uuid_t m_adv_uuids[] =                                   /**< Universally unique service identifiers. */
 {
@@ -936,6 +951,35 @@ static void clock_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+/**@brief Initialize TWI instance
+ */
+static void twi_init(void)
+{
+    ret_code_t err_code;
+
+    nrf_drv_twi_config_t const config = {
+       .scl                = SCL,
+       .sda                = SDA,
+       .frequency          = NRF_DRV_TWI_FREQ_100K,
+       .interrupt_priority = APP_IRQ_PRIORITY_LOWEST,
+       .clear_bus_init     = false
+    };
+
+    err_code = nrf_twi_mngr_init(&m_nrf_twi_mngr, &config);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_twi_sensor_init(&m_nrf_twi_sensor);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Initialize LIS2DH12 instance
+ */
+static void accel_init(void)
+{
+    nrf_gpio_cfg_output(CS);
+    nrf_gpio_pin_set(CS);
+    ret_code_t err_code = lis2dh12_init(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+}
 
 /**@brief Function for application main entry.
  */
@@ -974,6 +1018,8 @@ int main(void)
     sensor_simulator_init();
     conn_params_init();
     peer_manager_init();
+    twi_init();
+    accel_init();
     application_timers_start();
 
     // Create a FreeRTOS task for the BLE stack.
