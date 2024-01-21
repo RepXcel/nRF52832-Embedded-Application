@@ -15,7 +15,7 @@ The following debug configuration can be used with the [Cortex-Debug](vscode:ext
 {
     "name": "Jlink Lite Cortex-M Debug NRF52832",
     "cwd": "${fileDirname}",
-    "executable": "./d52/blank/armgcc/_build/nrf52832_xxaa.out",
+    "executable": "./d52/s132/armgcc/_build/nrf52832_xxaa.out",
     "request": "launch",
     "type": "cortex-debug",
     "runToEntryPoint": "main",
