@@ -81,6 +81,7 @@
 #include "nrf_drv_clock.h"
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
+#include "nrf_gpio.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -136,8 +137,8 @@
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
-#define MAX_PENDING_TRANSACTIONS            5                                       /**< Maximal number of pending I2C transactions */
-#define BUFFER_SIZE                         MAX_PENDING_TRANSACTIONS                /**< Buffer size */
+#define MAX_PENDING_TRANSACTIONS            33                                       /**< Maximal number of pending I2C transactions */
+#define BUFFER_SIZE                         32                /**< Buffer size */
 
 #define INT1 25
 #define INT2 26
@@ -152,8 +153,8 @@ NRF_BLE_GATT_DEF(m_gatt);                                                       
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
-NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, BUFFER_SIZE);                  /**< TWI sensor instance. */
-LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_LOW);     /**< LIS2DH12 accel instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, BUFFER_SIZE);                 /**< TWI sensor instance. */
+LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);    /**< LIS2DH12 accel instance. */
 
 static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static bool     m_rr_interval_enabled = true;                                       /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
@@ -180,6 +181,7 @@ static TimerHandle_t m_sensor_contact_timer;                        /**< Definit
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
 #endif
+static TaskHandle_t m_accel_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -951,9 +953,9 @@ static void clock_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Initialize TWI instance
+/**@brief Initialize LIS2DH12 instance
  */
-static void twi_init(void)
+static void accel_init(void)
 {
     ret_code_t err_code;
 
@@ -969,16 +971,42 @@ static void twi_init(void)
     APP_ERROR_CHECK(err_code);
     err_code = nrf_twi_sensor_init(&m_nrf_twi_sensor);
     APP_ERROR_CHECK(err_code);
+    // nrf_gpio_cfg_output(CS);
+    // nrf_gpio_pin_clear(CS);
+    err_code = lis2dh12_init(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Initialize LIS2DH12 instance
- */
-static void accel_init(void)
+static void accel_thread(void * arg)
 {
-    nrf_gpio_cfg_output(CS);
-    nrf_gpio_pin_set(CS);
-    ret_code_t err_code = lis2dh12_init(&m_lis2dh12);
+    UNUSED_PARAMETER(arg);
+    ret_code_t err_code;
+
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_10HZ, true, true, true, true, LIS2DH12_SCALE_2G, false);
+    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, BUFFER_SIZE);
+    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, 0, 0, 0, 0, 1, 0, 1, 0);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
+
+    lis2dh12_data_t accel_data[BUFFER_SIZE] = { {0, 0, 0} };
+    uint8_t fifo_src;
+    uint8_t who = 69;
+    while (1)
+    {
+        vTaskDelay(1000);
+
+        // READ FIFO SOURCE REGISTER
+        APP_ERROR_CHECK(lis2dh12_fifo_src_read(&m_lis2dh12, NULL, &fifo_src));
+        NRF_LOG_INFO("WTM: %d OVN: %d EMPTY: %d FSS: %2d ", (fifo_src & 0b10000000), (fifo_src & 0b01000000), (fifo_src & 0b00100000), (fifo_src & 0b0001111));
+        
+        APP_ERROR_CHECK(lis2dh12_who_am_i_read(&m_lis2dh12, NULL, &who));
+        NRF_LOG_INFO("WHO_AM_I: %x", who);
+        
+        APP_ERROR_CHECK(lis2dh12_data_read(&m_lis2dh12, NULL, accel_data, BUFFER_SIZE));
+        for (uint8_t i = 0; i < BUFFER_SIZE; i++){
+		    NRF_LOG_INFO("%d %d %d", accel_data[i].x, accel_data[i].y, accel_data[i].z);
+        }
+    }
 }
 
 /**@brief Function for application main entry.
@@ -1018,9 +1046,13 @@ int main(void)
     sensor_simulator_init();
     conn_params_init();
     peer_manager_init();
-    twi_init();
     accel_init();
     application_timers_start();
+
+    if (pdPASS != xTaskCreate(accel_thread, "ACCEL", 256, NULL, 1, &m_accel_thread))
+    {
+        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+    }
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
