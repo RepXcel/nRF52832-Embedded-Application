@@ -49,6 +49,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include "math.h"
 #include "nordic_common.h"
 #include "nrf.h"
 #include "app_error.h"
@@ -61,7 +62,10 @@
 #include "ble_hrs.h"
 #include "ble_dis.h"
 #include "ble_conn_params.h"
+#include "lis2dh12.h"
 #include "sensorsim.h"
+#include "nrf_gpio.h"
+#include "nrf_twi_mngr.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_soc.h"
 #include "nrf_sdh_ble.h"
@@ -77,6 +81,7 @@
 #include "fds.h"
 #include "ble_conn_state.h"
 #include "nrf_drv_clock.h"
+#include "nrf_drv_gpiote.h"
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
 
@@ -133,22 +138,40 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
+#define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
+#define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
+#define BUFFER_SIZE                         16                                      /**< Buffer size */
 
-BLE_BAS_DEF(m_bas);                                                 /**< Battery service instance. */
-BLE_HRS_DEF(m_hrs);                                                 /**< Heart rate service instance. */
-NRF_BLE_GATT_DEF(m_gatt);                                           /**< GATT module instance. */
-NRF_BLE_QWR_DEF(m_qwr);                                             /**< Context for the Queued Write module.*/
-BLE_ADVERTISING_DEF(m_advertising);                                 /**< Advertising module instance. */
+#define INT1 25
+#define INT2 26
+#define CS   27
+#define SA0  28
+#define SDA  29
+#define SCL  30
 
-static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
-static bool     m_rr_interval_enabled = true;                       /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
+#define OUT_LED BSP_LED_1
 
-static sensorsim_cfg_t   m_battery_sim_cfg;                         /**< Battery Level sensor simulator configuration. */
-static sensorsim_state_t m_battery_sim_state;                       /**< Battery Level sensor simulator state. */
-static sensorsim_cfg_t   m_heart_rate_sim_cfg;                      /**< Heart Rate sensor simulator configuration. */
-static sensorsim_state_t m_heart_rate_sim_state;                    /**< Heart Rate sensor simulator state. */
-static sensorsim_cfg_t   m_rr_interval_sim_cfg;                     /**< RR Interval sensor simulator configuration. */
-static sensorsim_state_t m_rr_interval_sim_state;                   /**< RR Interval sensor simulator state. */
+BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
+BLE_HRS_DEF(m_hrs);                                                                 /**< Heart rate service instance. */
+NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
+NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
+BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
+NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, BUFFER_SIZE);                 /**< TWI sensor instance. */
+LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);    /**< LIS2DH12 accel instance. */
+
+static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
+static bool     m_rr_interval_enabled = true;                                       /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
+static bool     data_available = false;
+static lis2dh12_data_t accel_data[BUFFER_SIZE] = { {0, 0, 0} };
+static float velocity;
+
+static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
+static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
+static sensorsim_cfg_t   m_heart_rate_sim_cfg;                                      /**< Heart Rate sensor simulator configuration. */
+static sensorsim_state_t m_heart_rate_sim_state;                                    /**< Heart Rate sensor simulator state. */
+static sensorsim_cfg_t   m_rr_interval_sim_cfg;                                     /**< RR Interval sensor simulator configuration. */
+static sensorsim_state_t m_rr_interval_sim_state;                                   /**< RR Interval sensor simulator state. */
 
 static ble_uuid_t m_adv_uuids[] =                                   /**< Universally unique service identifiers. */
 {
@@ -165,6 +188,7 @@ static TimerHandle_t m_sensor_contact_timer;                        /**< Definit
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
 #endif
+static TaskHandle_t m_accel_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -936,6 +960,100 @@ static void clock_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+/**@brief Initialize LIS2DH12 instance
+ */
+static void accel_init(void)
+{
+    ret_code_t err_code;
+
+    nrf_drv_twi_config_t const config = {
+       .scl                = SCL,
+       .sda                = SDA,
+       .frequency          = NRF_DRV_TWI_FREQ_100K,
+       .interrupt_priority = APP_IRQ_PRIORITY_LOWEST,
+       .clear_bus_init     = false
+    };
+
+    err_code = nrf_twi_mngr_init(&m_nrf_twi_mngr, &config);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_twi_sensor_init(&m_nrf_twi_sensor);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = lis2dh12_init(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+}
+
+static void in_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
+{
+	nrf_drv_gpiote_out_toggle(OUT_LED);
+}
+
+
+static void gpio_init(void){
+	ret_code_t err_code;
+
+	err_code = nrf_drv_gpiote_init();
+	APP_ERROR_CHECK(err_code);
+
+    nrf_gpio_cfg_output(CS);
+    nrf_gpio_pin_set(CS);
+
+    nrf_drv_gpiote_out_config_t out_config = GPIOTE_CONFIG_OUT_SIMPLE(true);
+    err_code = nrf_drv_gpiote_out_init(OUT_LED, &out_config);
+	APP_ERROR_CHECK(err_code);
+
+    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
+	err_code = nrf_drv_gpiote_in_init(INT1, &in_config, in_pin_handler);
+	APP_ERROR_CHECK(err_code);
+	nrf_drv_gpiote_in_event_enable(INT1, true);
+}
+
+static void acceleration_to_velocity(lis2dh12_data_t* accel_data, float* velocity, uint8_t samples){
+    for (uint8_t i = 0; i < samples; i++){
+        int16_t accel_x_mg = accel_data[i].x >> 4;
+        int16_t accel_y_mg = accel_data[i].y >> 4;
+        int16_t accel_z_mg = accel_data[i].z >> 4;
+        float accel_mag_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg) - 981.0f;
+        float accel_mps = accel_mag_mg / 1000.0f * 9.81f;
+        if (abs(accel_mps) > 0.3){
+            *velocity += accel_mps * 1/100.f;
+        } else {
+            *velocity *= 0.5;
+        }
+        NRF_LOG_INFO("Accel magnitude: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_mps));
+        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(*velocity));
+        }
+}
+
+static void accel_thread(void * arg)
+{
+    UNUSED_PARAMETER(arg);
+    ret_code_t err_code;
+
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_100HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+    
+    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, BUFFER_SIZE);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+    
+    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, 0, 0, 0, 0, 1, 0, 1, 0);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+
+    uint8_t fifo_src;
+    while (1)
+    {
+        vTaskDelay(100);
+        
+        APP_ERROR_CHECK(lis2dh12_data_read(&m_lis2dh12, NULL, accel_data, BUFFER_SIZE));
+        acceleration_to_velocity(accel_data, &velocity, BUFFER_SIZE);
+
+        data_available = false;
+        nrf_drv_gpiote_out_toggle(OUT_LED);
+    }
+}
 
 /**@brief Function for application main entry.
  */
@@ -965,6 +1083,7 @@ int main(void)
     ble_stack_init();
 
     // Initialize modules.
+    gpio_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
     gap_params_init();
@@ -974,7 +1093,13 @@ int main(void)
     sensor_simulator_init();
     conn_params_init();
     peer_manager_init();
+    accel_init();
     application_timers_start();
+
+    if (pdPASS != xTaskCreate(accel_thread, "ACCEL", 256, NULL, 1, &m_accel_thread))
+    {
+        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+    }
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.

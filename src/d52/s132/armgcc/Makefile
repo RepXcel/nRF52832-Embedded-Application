@@ -11,6 +11,13 @@ $(OUTPUT_DIRECTORY)/nrf52832_xxaa.out: \
 # Source files common to all targets
 SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/mdk/gcc_startup_nrf52.S \
+  $(SDK_ROOT)/components/drivers_ext/lis2dh12/lis2dh12.c \
+  $(SDK_ROOT)/components/libraries/twi_sensor/nrf_twi_sensor.c \
+  $(SDK_ROOT)/components/libraries/twi_mngr/nrf_twi_mngr.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twi.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_twim.c \
+  $(SDK_ROOT)/integration/nrfx/legacy/nrf_drv_twi.c \
+  $(SDK_ROOT)/components/libraries/queue/nrf_queue.c \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_rtt.c \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_serial.c \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_uart.c \
@@ -99,6 +106,7 @@ SRC_FILES += \
 # Include folders common to all targets
 INC_FOLDERS += \
   $(PROJ_DIR)/config \
+  $(SDK_ROOT)/components/drivers_ext/lis2dh12 \
   $(SDK_ROOT)/components/nfc/ndef/generic/message \
   $(SDK_ROOT)/components/nfc/t2t_lib \
   $(SDK_ROOT)/components/nfc/t4t_parser/hl_detection_procedure \
@@ -257,7 +265,7 @@ CFLAGS += -DS132
 CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -mcpu=cortex-m4
 CFLAGS += -mthumb -mabi=aapcs
-CFLAGS += -Wall -Werror
+CFLAGS += -Werror
 CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 # keep every function in a separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
