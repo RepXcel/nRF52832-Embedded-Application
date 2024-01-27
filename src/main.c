@@ -141,7 +141,7 @@
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
 #define ACCEl_BUFFER_SIZE                   16                                      /**< Buffer size */
-#define ACCEL_ERROR_THRESHOLD               7.0f                                   /**< Values below threshold will be treated as negligible acceleration*/
+#define ACCEL_ERROR_THRESHOLD               1.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_PERIOD                        1.0f / 100.0f                           /**< Accel sampling period */
 
 #define MG_TO_CMPS(MG)                      MG * 9.81f / 100.f                      /**< Converts from mg to cm/s^2 (centimeters per second)*/
@@ -1016,16 +1016,16 @@ static void acceleration_to_velocity(lis2dh12_data_t* m_accel_data, float* m_vel
         int16_t accel_x_mg = m_accel_data[i].x >> 4;
         int16_t accel_y_mg = m_accel_data[i].y >> 4;
         int16_t accel_z_mg = m_accel_data[i].z >> 4;
-        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg) - m_accel_tare;
-        float accel_magnitude_cmps = MG_TO_CMPS(accel_magnitude_mg);
-        if (accel_magnitude_cmps > ACCEL_ERROR_THRESHOLD){
-            *m_velocity += accel_magnitude_cmps * ACCEL_PERIOD;
+        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
+        float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
+        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
+            *m_velocity += accel_magnitude_cmpss * ACCEL_PERIOD;
         } else {
             *m_velocity *= 0.5;
         }
         // NRF_LOG_INFO("%d %d %d", accel_x_mg, accel_y_mg, accel_z_mg);
         // NRF_LOG_INFO("Accel magnitude (mg): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mg));
-        // NRF_LOG_INFO("Accel magnitude (cm/s): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_cmps));
+        NRF_LOG_INFO("Accel magnitude (cm/s): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_cmpss));
         NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(*m_velocity));
         }
 }
@@ -1035,7 +1035,7 @@ static void accel_thread(void * arg)
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
 
-    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_200HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_100HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
     err_code = lis2dh12_cfg_commit(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
     
@@ -1047,9 +1047,13 @@ static void accel_thread(void * arg)
     err_code = lis2dh12_cfg_commit(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
 
+    LIS2DH12_FILTER_CFG(m_lis2dh12, LIS2DH12_FILTER_MODE_NORMAL, LIS2DH12_FILTER_FREQ_1, 1, 0, 0, 0);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    APP_ERROR_CHECK(err_code);
+    
     while (1)
     {
-        vTaskDelay(20);
+        vTaskDelay(1);
 
         if(m_data_ready)
         {
@@ -1060,7 +1064,6 @@ static void accel_thread(void * arg)
             nrf_gpio_pin_set(OUT_LED);
             m_data_ready = false;
         }
-        
     }
 }
 
