@@ -44,13 +44,13 @@ struct ble_workout_data_s
 typedef struct
 {
     ble_workout_data_evt_handler_t         evt_handler;                    /**< Event handler to be called for handling events in the Custom Service. */
-    uint8_t                       initial_custom_value;           /**< Initial custom value */
+    float                       initial_custom_value;           /**< Initial custom value */
     ble_srv_cccd_security_mode_t  custom_value_char_attr_md;     /**< Initial security level for Custom characteristics attribute */
 } ble_workout_data_init_t;
 
 uint32_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init);
 
-uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, uint8_t custom_value);
+uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, float custom_value);
 
 void ble_workout_data_on_ble_evt( ble_evt_t const * p_ble_evt, void * p_context);
 

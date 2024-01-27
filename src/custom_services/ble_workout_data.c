@@ -81,9 +81,9 @@ static uint32_t custom_value_char_add(ble_workout_data_t * p_workout_data, const
 
     attr_char_value.p_uuid    = &ble_uuid;
     attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = sizeof(uint8_t);
+    attr_char_value.init_len  = sizeof(float);
     attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = sizeof(uint8_t);
+    attr_char_value.max_len   = sizeof(float);
 
     err_code = sd_ble_gatts_characteristic_add(p_workout_data->service_handle, &char_md,
                                                &attr_char_value,
@@ -96,7 +96,7 @@ static uint32_t custom_value_char_add(ble_workout_data_t * p_workout_data, const
     return NRF_SUCCESS;
 }
 
-uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, uint8_t custom_value)
+uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, float custom_value)
 {
     NRF_LOG_INFO("In ble_cus_custom_value_update. \r\n"); 
     if (p_workout_data == NULL)
@@ -110,7 +110,7 @@ uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_dat
     // Initialize value struct.
     memset(&gatts_value, 0, sizeof(gatts_value));
 
-    gatts_value.len     = sizeof(uint8_t);
+    gatts_value.len     = sizeof(float);
     gatts_value.offset  = 0;
     gatts_value.p_value = &custom_value;
 

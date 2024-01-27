@@ -139,7 +139,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define NOTIFICATION_INTERVAL           1000
+#define NOTIFICATION_INTERVAL           250
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
@@ -173,7 +173,6 @@ static bool             m_rr_interval_enabled = true;                           
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = { {0, 0, 0} };            /**< Buffer for accel samples */
 static float            m_velocity =  0.0f;                                         /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
-static float            m_accel_tare = 965.f;                                       /**< Accel tare value*/
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
 static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
@@ -187,14 +186,14 @@ static sensorsim_state_t m_rr_interval_sim_state;                               
 //{BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
 static ble_uuid_t m_adv_uuids[] =                                   /**< Universally unique service identifiers. */
 {
-    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN }
+    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}
 };
 
 static TimerHandle_t m_battery_timer;                               /**< Definition of battery timer. */
 static TimerHandle_t m_heart_rate_timer;                            /**< Definition of heart rate timer. */
 static TimerHandle_t m_rr_interval_timer;                           /**< Definition of RR interval timer. */
 static TimerHandle_t m_sensor_contact_timer;                        /**< Definition of sensor contact detected timer. */
-TimerHandle_t ble_notif_timer_handle;
+static TimerHandle_t ble_notif_timer_handle;
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
@@ -360,14 +359,18 @@ static void sensor_contact_detected_timeout_handler(TimerHandle_t xTimer)
 
 static void notification_timeout_handler(void * p_context)
 {
-    // UNUSED_PARAMETER(p_context);
-    // ret_code_t err_code;
+    UNUSED_PARAMETER(p_context);
+    ret_code_t err_code;
     
-    // // Increment the value of m_custom_value before nortifing it.
-    // m_custom_value++;
+    // Increment the value of m_custom_value before nortifing it.
+    if (m_custom_value == 0) {
+        m_custom_value = 1;
+    } else {
+        m_custom_value = 0;
+    }
     
-    // err_code = ble_workout_data_custom_value_update(&m_workout_data, m_custom_value);
-    // APP_ERROR_CHECK(err_code);
+    err_code = ble_workout_data_custom_value_update(&m_workout_data, velocity);
+    APP_ERROR_CHECK(err_code);
 }
 
 /**@brief Function for the Timer initialization.
@@ -404,13 +407,6 @@ static void timers_init(void)
     //                                       sensor_contact_detected_timeout_handler);
 
     /* Error checking */
-    if ( (NULL == m_battery_timer)
-         || (NULL == m_heart_rate_timer)
-         || (NULL == m_rr_interval_timer)
-         || (NULL == m_sensor_contact_timer) )
-    {
-        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    }
 }
 
 
@@ -557,7 +553,7 @@ static void services_init(void)
     // err_code = ble_dis_init(&dis_init);
     // APP_ERROR_CHECK(err_code);
 
-    // ble_workout_data_init_t            workout_data_init;
+    ble_workout_data_init_t            workout_data_init;
 
     // Initialize workout data Service init structure to zero.
     memset(&workout_data_init, 0, sizeof(workout_data_init));
@@ -904,7 +900,8 @@ static void advertising_init(void)
 
     memset(&init, 0, sizeof(init));
 
-    init.advdata.name_type               = BLE_ADVDATA_FULL_NAME;
+    init.advdata.name_type               = BLE_ADVDATA_SHORT_NAME;
+    init.advdata.short_name_len          = 3;
     init.advdata.include_appearance      = true;
     init.advdata.flags                   = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
     init.advdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
@@ -1157,7 +1154,6 @@ int main(void)
     gatt_init();
     services_init();
     advertising_init();
-    sensor_simulator_init();
     conn_params_init();
     peer_manager_init();
     accel_init();
