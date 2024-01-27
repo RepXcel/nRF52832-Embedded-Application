@@ -314,10 +314,15 @@ LIB_FILES += -lc -lnosys -lm
 # Default target - first one defined
 default: nrf52832_xxaa
 
+# Debug
+debug: default
+  CFLAGS += -DDEBUG
+
 # Print all targets that can be built
 help:
 	@echo following targets are available:
 	@echo		nrf52832_xxaa
+	@echo		debug - nrf52832_xxaa w/ DEBUG flag
 	@echo		flash_softdevice
 	@echo		sdk_config - starting external tool for editing sdk_config.h
 	@echo		flash      - flashing binary
