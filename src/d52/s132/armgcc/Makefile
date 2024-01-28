@@ -309,14 +309,14 @@ nrf52832_xxaa: ASMFLAGS += -D__STACK_SIZE=2048
 LIB_FILES += -lc -lnosys -lm
 
 
-.PHONY: default help
+.PHONY: default debug help
 
 # Default target - first one defined
 default: nrf52832_xxaa
 
 # Debug
-debug: default
-  CFLAGS += -DDEBUG
+debug: CFLAGS += -DDEBUG
+debug: nrf52832_xxaa
 
 # Print all targets that can be built
 help:
