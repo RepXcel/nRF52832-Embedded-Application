@@ -72,7 +72,6 @@ SRC_FILES += \
   $(SDK_ROOT)/components/libraries/bsp/bsp.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
   $(PROJ_DIR)/main.c \
-  $(PROJ_DIR)/custom_services/ble_workout_data.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_Syscalls_GCC.c \
   $(SDK_ROOT)/external/segger_rtt/SEGGER_RTT_printf.c \
@@ -107,7 +106,6 @@ SRC_FILES += \
 # Include folders common to all targets
 INC_FOLDERS += \
   $(PROJ_DIR)/config \
-  $(PROJ_DIR)/custom_services \
   $(SDK_ROOT)/components/drivers_ext/lis2dh12 \
   $(SDK_ROOT)/components/nfc/ndef/generic/message \
   $(SDK_ROOT)/components/nfc/t2t_lib \
@@ -256,7 +254,6 @@ OPT = -O3 -g3
 # C flags common to all targets
 CFLAGS += $(OPT)
 CFLAGS += -DBOARD_D52DK1
-CFLAGS += -DDEBUG
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 CFLAGS += -DFLOAT_ABI_HARD
 CFLAGS += -DFREERTOS
@@ -282,7 +279,6 @@ ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 ASMFLAGS += -DBOARD_D52DK1
-ASMFLAGS += -DDEBUG
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
 ASMFLAGS += -DFLOAT_ABI_HARD
 ASMFLAGS += -DFREERTOS
@@ -313,14 +309,14 @@ nrf52832_xxaa: ASMFLAGS += -D__STACK_SIZE=2048
 LIB_FILES += -lc -lnosys -lm
 
 
-.PHONY: default release help
+.PHONY: default debug help
 
 # Default target - first one defined
 default: nrf52832_xxaa
 
 # Debug
-release: CFLAGS -= -DDEBUG
-release: nrf52832_xxaa
+debug: CFLAGS += -DDEBUG
+debug: nrf52832_xxaa
 
 # Print all targets that can be built
 help:
@@ -338,7 +334,7 @@ include $(TEMPLATE_PATH)/Makefile.common
 
 $(foreach target, $(TARGETS), $(call define_target, $(target)))
 
-.PHONY: flash flash_softdevice erase clear
+.PHONY: flash flash_softdevice erase
 
 # Flash the program
 flash: default
@@ -359,6 +355,3 @@ SDK_CONFIG_FILE := ../config/sdk_config.h
 CMSIS_CONFIG_TOOL := $(SDK_ROOT)/external_tools/cmsisconfig/CMSIS_Configuration_Wizard.jar
 sdk_config:
 	java -jar $(CMSIS_CONFIG_TOOL) $(SDK_CONFIG_FILE)
-
-clear:
-	rm -rf _build
