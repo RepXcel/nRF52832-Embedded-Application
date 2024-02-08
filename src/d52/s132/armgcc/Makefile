@@ -309,15 +309,20 @@ nrf52832_xxaa: ASMFLAGS += -D__STACK_SIZE=2048
 LIB_FILES += -lc -lnosys -lm
 
 
-.PHONY: default help
+.PHONY: default debug help
 
 # Default target - first one defined
 default: nrf52832_xxaa
+
+# Debug
+debug: CFLAGS += -DDEBUG
+debug: nrf52832_xxaa
 
 # Print all targets that can be built
 help:
 	@echo following targets are available:
 	@echo		nrf52832_xxaa
+	@echo		debug - nrf52832_xxaa w/ DEBUG flag
 	@echo		flash_softdevice
 	@echo		sdk_config - starting external tool for editing sdk_config.h
 	@echo		flash      - flashing binary
