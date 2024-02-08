@@ -1,0 +1,23 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Jlink Lite Cortex-M Debug NRF52832",
+            "cwd": "${fileDirname}",
+            "executable": "./d52/s132/armgcc/_build/nrf52832_xxaa.out",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "jlink",
+            "serverpath": "C:/Program Files/SEGGER/JLink/JLinkGDBServerCL.exe",
+            "armToolchainPath": "C:/Program Files (x86)/GNU Arm Embedded Toolchain/10 2021.10/bin",
+            "device": "NRF52832_xxAA",
+            "interface": "swd",
+        }
+    ]
+
+    
+}
