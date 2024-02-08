@@ -256,6 +256,7 @@ OPT = -O3 -g3
 # C flags common to all targets
 CFLAGS += $(OPT)
 CFLAGS += -DBOARD_D52DK1
+CFLAGS += -DDEBUG
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 CFLAGS += -DFLOAT_ABI_HARD
 CFLAGS += -DFREERTOS
@@ -281,6 +282,7 @@ ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 ASMFLAGS += -DBOARD_D52DK1
+ASMFLAGS += -DDEBUG
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
 ASMFLAGS += -DFLOAT_ABI_HARD
 ASMFLAGS += -DFREERTOS
@@ -311,14 +313,14 @@ nrf52832_xxaa: ASMFLAGS += -D__STACK_SIZE=2048
 LIB_FILES += -lc -lnosys -lm
 
 
-.PHONY: default debug help
+.PHONY: default release help
 
 # Default target - first one defined
 default: nrf52832_xxaa
 
 # Debug
-debug: CFLAGS += -DDEBUG
-debug: nrf52832_xxaa
+release: CFLAGS -= -DDEBUG
+release: nrf52832_xxaa
 
 # Print all targets that can be built
 help:
@@ -336,7 +338,7 @@ include $(TEMPLATE_PATH)/Makefile.common
 
 $(foreach target, $(TARGETS), $(call define_target, $(target)))
 
-.PHONY: flash flash_softdevice erase
+.PHONY: flash flash_softdevice erase clear
 
 # Flash the program
 flash: default
@@ -357,3 +359,6 @@ SDK_CONFIG_FILE := ../config/sdk_config.h
 CMSIS_CONFIG_TOOL := $(SDK_ROOT)/external_tools/cmsisconfig/CMSIS_Configuration_Wizard.jar
 sdk_config:
 	java -jar $(CMSIS_CONFIG_TOOL) $(SDK_CONFIG_FILE)
+
+clear:
+	rm -rf _build
