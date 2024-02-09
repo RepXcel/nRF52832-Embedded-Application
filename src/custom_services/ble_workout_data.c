@@ -6,14 +6,106 @@
 #include "boards.h"
 #include "nrf_log.h"
 
-uint32_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init)
+static void on_connect(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
+{
+    p_workout_data->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
+
+    if(p_workout_data->evt_handler != NULL){
+        ble_workout_data_evt_t evt  = { BLE_WORKOUT_DATA_EVT_CONNECTED };
+        p_workout_data->evt_handler(p_workout_data, &evt);
+    }
+}
+
+static void on_disconnect(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
+{
+    UNUSED_PARAMETER(p_ble_evt);
+    p_workout_data->conn_handle = BLE_CONN_HANDLE_INVALID;
+
+    if(p_workout_data->evt_handler != NULL){
+        ble_workout_data_evt_t evt  = { BLE_WORKOUT_DATA_EVT_DISCONNECTED };
+        p_workout_data->evt_handler(p_workout_data, &evt);
+    }
+}
+
+static void on_write(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
+{
+    ble_gatts_evt_write_t const * p_evt_write = &p_ble_evt->evt.gatts_evt.params.write;
+    
+    // Check if the handle passed with the event matches the Custom Value Characteristic handle.
+    if (p_evt_write->handle == p_workout_data->custom_value_handles.value_handle)
+    {
+        
+    }
+
+    if ((p_evt_write->handle == p_workout_data->custom_value_handles.cccd_handle) && (p_evt_write->len == 2))
+    {
+        // CCCD written, call application event handler
+        if (p_workout_data->evt_handler != NULL)
+        {
+            ble_workout_data_evt_t evt = {0};
+            evt.evt_type = ble_srv_is_notification_enabled(p_evt_write->data) ? BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED : BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED;
+            // Call the application event handler.
+            p_workout_data->evt_handler(p_workout_data, &evt);
+        }
+
+    }
+}
+
+static ret_code_t custom_value_char_add(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init)
+{
+    ret_code_t err_code;
+    ble_gatts_char_md_t char_md         = {0};
+    ble_gatts_attr_md_t cccd_md         = {0};
+    ble_gatts_attr_t attr_char_value    = {0};
+    ble_uuid_t ble_uuid                 = {0};
+    ble_gatts_attr_md_t attr_md         = {0};
+
+    //  Read  operation on Cccd should be possible without authentication.
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.write_perm);
+    cccd_md.vloc       = BLE_GATTS_VLOC_STACK;
+
+    char_md.char_props.read   = true;
+    char_md.char_props.write  = true;
+    char_md.char_props.notify = true; 
+    char_md.p_char_user_desc  = NULL;
+    char_md.p_char_pf         = NULL;
+    char_md.p_user_desc_md    = NULL;
+    char_md.p_cccd_md         = &cccd_md; 
+    char_md.p_sccd_md         = NULL;
+
+    attr_md.read_perm  = p_workout_data_init->custom_value_char_attr_md.read_perm;
+    attr_md.write_perm = p_workout_data_init->custom_value_char_attr_md.write_perm;
+    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth    = false;
+    attr_md.wr_auth    = false;
+    attr_md.vlen       = false;
+
+    ble_uuid.type = p_workout_data->uuid_type;
+    ble_uuid.uuid = CUSTOM_VALUE_CHAR_UUID;
+
+    attr_char_value.p_uuid    = &ble_uuid;
+    attr_char_value.p_attr_md = &attr_md;
+    attr_char_value.init_len  = sizeof(workout_data_t);
+    attr_char_value.init_offs = 0;
+    attr_char_value.max_len   = sizeof(workout_data_t);
+
+    err_code = sd_ble_gatts_characteristic_add(p_workout_data->service_handle, &char_md,
+                                               &attr_char_value,
+                                               &p_workout_data->custom_value_handles);
+    VERIFY_SUCCESS(err_code);
+
+    return NRF_SUCCESS;
+}
+
+ret_code_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init)
 {
     if (p_workout_data == NULL || p_workout_data_init == NULL)
     {
         return NRF_ERROR_NULL;
     }
 
-    uint32_t   err_code;
+    ret_code_t   err_code;
     ble_uuid_t ble_uuid;
 
     // Initialize service structure
@@ -30,105 +122,38 @@ uint32_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_wo
 
     // Add the Custom Service
     err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, &ble_uuid, &p_workout_data->service_handle);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    VERIFY_SUCCESS(err_code);
 
-    return custom_value_char_add(p_workout_data, p_workout_data_init);
-}
-static uint32_t custom_value_char_add(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init)
-{
-    uint32_t            err_code;
-    ble_gatts_char_md_t char_md;
-    ble_gatts_attr_md_t cccd_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_uuid_t          ble_uuid;
-    ble_gatts_attr_md_t attr_md;
-
-    memset(&cccd_md, 0, sizeof(cccd_md));
-
-    //  Read  operation on Cccd should be possible without authentication.
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.write_perm);
-    
-    cccd_md.vloc       = BLE_GATTS_VLOC_STACK;
-
-    memset(&char_md, 0, sizeof(char_md));
-
-    char_md.char_props.read   = 1;
-    char_md.char_props.write  = 1;
-    char_md.char_props.notify = 1; 
-    char_md.p_char_user_desc  = NULL;
-    char_md.p_char_pf         = NULL;
-    char_md.p_user_desc_md    = NULL;
-    char_md.p_cccd_md         = &cccd_md; 
-    char_md.p_sccd_md         = NULL;
-		
-    memset(&attr_md, 0, sizeof(attr_md));
-
-    attr_md.read_perm  = p_workout_data_init->custom_value_char_attr_md.read_perm;
-    attr_md.write_perm = p_workout_data_init->custom_value_char_attr_md.write_perm;
-    attr_md.vloc       = BLE_GATTS_VLOC_STACK;
-    attr_md.rd_auth    = 0;
-    attr_md.wr_auth    = 0;
-    attr_md.vlen       = 0;
-
-    ble_uuid.type = p_workout_data->uuid_type;
-    ble_uuid.uuid = CUSTOM_VALUE_CHAR_UUID;
-
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-
-    attr_char_value.p_uuid    = &ble_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = sizeof(float);
-    attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = sizeof(float);
-
-    err_code = sd_ble_gatts_characteristic_add(p_workout_data->service_handle, &char_md,
-                                               &attr_char_value,
-                                               &p_workout_data->custom_value_handles);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    err_code = custom_value_char_add(p_workout_data, p_workout_data_init);
+    VERIFY_SUCCESS(err_code);
 
     return NRF_SUCCESS;
 }
 
-uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, float custom_value)
+ret_code_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, workout_data_t custom_value)
 {
-    NRF_LOG_INFO("In ble_cus_custom_value_update. \r\n"); 
     if (p_workout_data == NULL)
     {
         return NRF_ERROR_NULL;
     }
 
-    uint32_t err_code = NRF_SUCCESS;
-    ble_gatts_value_t gatts_value;
+    ret_code_t err_code = NRF_SUCCESS;
+    ble_gatts_value_t gatts_value = {0};
 
-    // Initialize value struct.
-    memset(&gatts_value, 0, sizeof(gatts_value));
-
-    gatts_value.len     = sizeof(float);
+    gatts_value.len     = sizeof(workout_data_t);
     gatts_value.offset  = 0;
-    gatts_value.p_value = &custom_value;
+    gatts_value.p_value = custom_value.byte_array;
 
     // Update database.
     err_code = sd_ble_gatts_value_set(p_workout_data->conn_handle,
                                       p_workout_data->custom_value_handles.value_handle,
                                       &gatts_value);
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    VERIFY_SUCCESS(err_code);
 
     // Send value if connected and notifying.
-    if ((p_workout_data->conn_handle != BLE_CONN_HANDLE_INVALID)) 
+    if (p_workout_data->conn_handle != BLE_CONN_HANDLE_INVALID) 
     {
-        ble_gatts_hvx_params_t hvx_params;
-
-        memset(&hvx_params, 0, sizeof(hvx_params));
+        ble_gatts_hvx_params_t hvx_params = {0};
 
         hvx_params.handle = p_workout_data->custom_value_handles.value_handle;
         hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
@@ -138,11 +163,6 @@ uint32_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_dat
 
         err_code = sd_ble_gatts_hvx(p_workout_data->conn_handle, &hvx_params);
     }
-    else
-    {
-        err_code = NRF_ERROR_INVALID_STATE;
-    }
-
 
     return err_code;
 }
@@ -173,50 +193,5 @@ void ble_workout_data_on_ble_evt( ble_evt_t const * p_ble_evt, void * p_context)
         default:
             
             break;
-    }
-}
-
-static void on_connect(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
-{
-    p_workout_data->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-}
-
-static void on_disconnect(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
-{
-    UNUSED_PARAMETER(p_ble_evt);
-    p_workout_data->conn_handle = BLE_CONN_HANDLE_INVALID;
-}
-
-static void on_write(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
-{
-    ble_gatts_evt_write_t * p_evt_write = &p_ble_evt->evt.gatts_evt.params.write;
-    
-    // Check if the handle passed with the event matches the Custom Value Characteristic handle.
-    if (p_evt_write->handle == p_workout_data->custom_value_handles.value_handle)
-    {
-        
-    }
-
-    if ((p_evt_write->handle == p_workout_data->custom_value_handles.cccd_handle)
-        && (p_evt_write->len == 2))
-    {
-
-        // CCCD written, call application event handler
-        if (p_workout_data->evt_handler != NULL)
-        {
-            ble_workout_data_evt_t evt;
-
-            if (ble_srv_is_notification_enabled(p_evt_write->data))
-            {
-                evt.evt_type = BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED;
-            }
-            else
-            {
-                evt.evt_type = BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED;
-            }
-            // Call the application event handler.
-            p_workout_data->evt_handler(p_workout_data, &evt);
-        }
-
     }
 }

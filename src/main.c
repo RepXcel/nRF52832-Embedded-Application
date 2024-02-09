@@ -105,20 +105,10 @@
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
 
-#define HEART_RATE_MEAS_INTERVAL            1000                                    /**< Heart rate measurement interval (ms). */
-#define MIN_HEART_RATE                      140                                     /**< Minimum heart rate as returned by the simulated measurement function. */
-#define MAX_HEART_RATE                      300                                     /**< Maximum heart rate as returned by the simulated measurement function. */
-#define HEART_RATE_INCREMENT                10                                      /**< Value by which the heart rate is incremented/decremented for each call to the simulated measurement function. */
-
-#define RR_INTERVAL_INTERVAL                300                                     /**< RR interval interval (ms). */
-#define MIN_RR_INTERVAL                     100                                     /**< Minimum RR interval as returned by the simulated measurement function. */
-#define MAX_RR_INTERVAL                     500                                     /**< Maximum RR interval as returned by the simulated measurement function. */
-#define RR_INTERVAL_INCREMENT               1                                       /**< Value by which the RR interval is incremented/decremented for each call to the simulated measurement function. */
-
 #define SENSOR_CONTACT_DETECTED_INTERVAL    5000                                    /**< Sensor Contact Detected toggle interval (ms). */
 
-#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(400, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.4 seconds). */
-#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(650, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.65 second). */
+#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.4 seconds). */
+#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.65 second). */
 #define SLAVE_LATENCY                       0                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                    MSEC_TO_UNITS(4000, UNIT_10_MS)         /**< Connection supervisory time-out (4 seconds). */
 
@@ -139,24 +129,22 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define NOTIFICATION_INTERVAL           250
+#define NOTIFICATION_INTERVAL               20                                     /**< Notificatio update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
-#define ACCEl_BUFFER_SIZE                   16                                      /**< Buffer size */
+#define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_ERROR_THRESHOLD               2.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
-#define ACCEL_PERIOD                        1.0f / 50.0f                           /**< Accel sampling period */
+#define ACCEL_PERIOD                        1.0f / 50.0f                            /**< Accel sampling period */
 
 #define MG_TO_CMPS(MG)                      MG * 9.81f / 100.f                      /**< Converts from mg to cm/s^2 (centimeters per second)*/
 
-#define INT1                                25
-#define INT2                                26
-#define CS                                  27
-#define SA0                                 28
-#define SDA                                 29
-#define SCL                                 30
-
-#define OUT_LED BSP_LED_1
+#define LIS2DH12_INT1                                25
+#define LIS2DH12_INT2                                26
+#define LIS2DH12_CS                                  27
+#define LIS2DH12_SA0                                 28
+#define LIS2DH12_SDA                                 29
+#define LIS2DH12_SCL                                 30
 
 BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
 BLE_HRS_DEF(m_hrs);                                                                 /**< Heart rate service instance. */
@@ -164,36 +152,28 @@ NRF_BLE_GATT_DEF(m_gatt);                                                       
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
-NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, BUFFER_SIZE);                 /**< TWI sensor instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, ACCEl_BUFFER_SIZE);                 /**< TWI sensor instance. */
 LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);    /**< LIS2DH12 accel instance. */
 BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
-static bool             m_rr_interval_enabled = true;                               /**< Flag for enabling and disabling the registration of new RR interval measurements (the purpose of disabling this is just to test sending HRM without RR interval data. */
-static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = { {0, 0, 0} };            /**< Buffer for accel samples */
-static float            m_velocity =  0.0f;                                         /**< Velocity value*/
+static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
+static workout_data_t   m_velocity =  {0};                                         /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
 static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
-static sensorsim_cfg_t   m_heart_rate_sim_cfg;                                      /**< Heart Rate sensor simulator configuration. */
-static sensorsim_state_t m_heart_rate_sim_state;                                    /**< Heart Rate sensor simulator state. */
-static sensorsim_cfg_t   m_rr_interval_sim_cfg;                                     /**< RR Interval sensor simulator configuration. */
-static sensorsim_state_t m_rr_interval_sim_state;                                   /**< RR Interval sensor simulator state. */
 
-//{BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE},
-//{BLE_UUID_HEART_RATE_SERVICE, BLE_UUID_TYPE_BLE},
-//{BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
-static ble_uuid_t m_adv_uuids[] =                                   /**< Universally unique service identifiers. */
-{
-    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}
+static ble_uuid_t m_adv_uuids[] = {                                                 /**< Universally unique service identifiers. */
+    {BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
+};
+
+static ble_uuid_t m_sr_uuids[] = {
+    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}               /**< Universally unique service identifiers. */
 };
 
 static TimerHandle_t m_battery_timer;                               /**< Definition of battery timer. */
-static TimerHandle_t m_heart_rate_timer;                            /**< Definition of heart rate timer. */
-static TimerHandle_t m_rr_interval_timer;                           /**< Definition of RR interval timer. */
-static TimerHandle_t m_sensor_contact_timer;                        /**< Definition of sensor contact detected timer. */
-static TimerHandle_t ble_notif_timer_handle;
+static TimerHandle_t m_ble_notif_timer;
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
@@ -202,6 +182,58 @@ static TaskHandle_t m_accel_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
+static void update_velocity(){
+    uint8_t samples_to_read = 0;
+    for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
+        int16_t accel_x_mg = m_accel_data[i].x >> 4;
+        int16_t accel_y_mg = m_accel_data[i].y >> 4;
+        int16_t accel_z_mg = m_accel_data[i].z >> 4;
+        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
+        float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
+        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
+            samples_to_read = 3;
+        }
+        if(samples_to_read){
+            m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
+        } else {
+            m_velocity.data = 0;
+            samples_to_read = MAX(samples_to_read - 1, 0);
+        }
+        // NRF_LOG_INFO("i:%d %d %d %d", i, accel_x_mg, accel_y_mg, accel_z_mg);
+        // NRF_LOG_INFO("Accel magnitude (mg): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mg));
+        // NRF_LOG_INFO("Accel magnitude (cm/s): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_cmpss));
+        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
+    }
+}
+
+static void accel_thread(void * arg)
+{
+    UNUSED_PARAMETER(arg);
+    ret_code_t err_code;
+
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_200HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
+    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, ACCEl_BUFFER_SIZE);
+    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, false, false, false, false, true, false, true, false);
+    LIS2DH12_FILTER_CFG(m_lis2dh12, LIS2DH12_FILTER_MODE_NORMAL, LIS2DH12_FILTER_FREQ_1, true, false, false, false);
+    
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    
+    APP_ERROR_CHECK(err_code);
+    
+    while (1)
+    {
+        __WFI();
+        if(m_data_ready)
+        {
+            err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
+            APP_ERROR_CHECK(err_code);
+            update_velocity();
+
+            bsp_board_led_off(BSP_BOARD_LED_1);
+            m_data_ready = false;
+        }
+    }
+}
 
 /**@brief Callback function for asserts in the SoftDevice.
  *
@@ -243,7 +275,6 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
     }
 }
 
-
 /**@brief Function for performing battery measurement and updating the Battery Level characteristic
  *        in Battery Service.
  */
@@ -281,95 +312,11 @@ static void battery_level_meas_timeout_handler(TimerHandle_t xTimer)
 }
 
 
-/**@brief Function for handling the Heart rate measurement timer time-out.
- *
- * @details This function will be called each time the heart rate measurement timer expires.
- *          It will exclude RR Interval data from every third measurement.
- *
- * @param[in] xTimer Handler to the timer that called this function.
- *                   You may get identifier given to the function xTimerCreate using pvTimerGetTimerID.
- */
-static void heart_rate_meas_timeout_handler(TimerHandle_t xTimer)
-{
-    static uint32_t cnt = 0;
-    ret_code_t      err_code;
-    uint16_t        heart_rate;
-
-    UNUSED_PARAMETER(xTimer);
-
-    heart_rate = (uint16_t)sensorsim_measure(&m_heart_rate_sim_state, &m_heart_rate_sim_cfg);
-
-    cnt++;
-    err_code = ble_hrs_heart_rate_measurement_send(&m_hrs, heart_rate);
-    if ((err_code != NRF_SUCCESS) &&
-        (err_code != NRF_ERROR_INVALID_STATE) &&
-        (err_code != NRF_ERROR_RESOURCES) &&
-        (err_code != NRF_ERROR_BUSY) &&
-        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
-       )
-    {
-        APP_ERROR_HANDLER(err_code);
-    }
-
-    // Disable RR Interval recording every third heart rate measurement.
-    // NOTE: An application will normally not do this. It is done here just for testing generation
-    // of messages without RR Interval measurements.
-    m_rr_interval_enabled = ((cnt % 3) != 0);
-}
-
-
-/**@brief Function for handling the RR interval timer time-out.
- *
- * @details This function will be called each time the RR interval timer expires.
- *
- * @param[in] xTimer Handler to the timer that called this function.
- *                   You may get identifier given to the function xTimerCreate using pvTimerGetTimerID.
- */
-static void rr_interval_timeout_handler(TimerHandle_t xTimer)
-{
-    UNUSED_PARAMETER(xTimer);
-
-    if (m_rr_interval_enabled)
-    {
-        uint16_t rr_interval;
-
-        rr_interval = (uint16_t)sensorsim_measure(&m_rr_interval_sim_state,
-                                                  &m_rr_interval_sim_cfg);
-        ble_hrs_rr_interval_add(&m_hrs, rr_interval);
-    }
-}
-
-
-/**@brief Function for handling the Sensor Contact Detected timer time-out.
- *
- * @details This function will be called each time the Sensor Contact Detected timer expires.
- *
- * @param[in] xTimer Handler to the timer that called this function.
- *                   You may get identifier given to the function xTimerCreate using pvTimerGetTimerID.
- */
-static void sensor_contact_detected_timeout_handler(TimerHandle_t xTimer)
-{
-    static bool sensor_contact_detected = false;
-
-    UNUSED_PARAMETER(xTimer);
-
-    sensor_contact_detected = !sensor_contact_detected;
-    ble_hrs_sensor_contact_detected_update(&m_hrs, sensor_contact_detected);
-}
-
 static void notification_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    
-    // Increment the value of m_custom_value before nortifing it.
-    if (m_custom_value == 0) {
-        m_custom_value = 1;
-    } else {
-        m_custom_value = 0;
-    }
-    
-    err_code = ble_workout_data_custom_value_update(&m_workout_data, velocity);
+    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_velocity);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -384,29 +331,13 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 
     // Create timers.
-    ble_notif_timer_handle = xTimerCreate("WKT", NOTIFICATION_INTERVAL, pdTRUE, NULL, notification_timeout_handler);
-    // m_battery_timer = xTimerCreate("BATT",
-    //                                BATTERY_LEVEL_MEAS_INTERVAL,
-    //                                pdTRUE,
-    //                                NULL,
-    //                                battery_level_meas_timeout_handler);
-    // m_heart_rate_timer = xTimerCreate("HRT",
-    //                                   HEART_RATE_MEAS_INTERVAL,
-    //                                   pdTRUE,
-    //                                   NULL,
-    //                                   heart_rate_meas_timeout_handler);
-    // m_rr_interval_timer = xTimerCreate("RRT",
-    //                                    RR_INTERVAL_INTERVAL,
-    //                                    pdTRUE,
-    //                                    NULL,
-    //                                    rr_interval_timeout_handler);
-    // m_sensor_contact_timer = xTimerCreate("SCT",
-    //                                       SENSOR_CONTACT_DETECTED_INTERVAL,
-    //                                       pdTRUE,
-    //                                       NULL,
-    //                                       sensor_contact_detected_timeout_handler);
+    m_ble_notif_timer = xTimerCreate("WKT", NOTIFICATION_INTERVAL, pdTRUE, NULL, notification_timeout_handler);
+    m_battery_timer = xTimerCreate("BATT",
+                                   BATTERY_LEVEL_MEAS_INTERVAL,
+                                   pdTRUE,
+                                   NULL,
+                                   battery_level_meas_timeout_handler);
 
-    /* Error checking */
 }
 
 
@@ -428,7 +359,7 @@ static void gap_params_init(void)
                                           strlen(DEVICE_NAME));
     APP_ERROR_CHECK(err_code);
 
-    err_code = sd_ble_gap_appearance_set(BLE_APPEARANCE_HEART_RATE_SENSOR_HEART_RATE_BELT);
+    err_code = sd_ble_gap_appearance_set(BLE_APPEARANCE_GENERIC_COMPUTER);
     APP_ERROR_CHECK(err_code);
 
     memset(&gap_conn_params, 0, sizeof(gap_conn_params));
@@ -465,25 +396,33 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 
 static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble_workout_data_evt_t * p_evt)
 {
-    ret_code_t err_code;
+    BaseType_t xReturn;
     switch(p_evt->evt_type)
     {
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED:
-            if (pdPASS != xTimerStart(ble_notif_timer_handle, OSTIMER_WAIT_FOR_QUEUE))
-                {
+            NRF_LOG_INFO("WORKOUT EVENT: NOTIF ENABLED");
+            xReturn = xTimerStart(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-                }
+            }
+            vTaskResume(m_accel_thread);
             break;
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
-            //err_code = app_timer_stop(m_notification_timer_id);
-            //APP_ERROR_CHECK(err_code);
+            NRF_LOG_INFO("WORKOUT EVENT: NOTIF DISABLED");
+            xReturn = xTimerStop(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            if (xReturn != pdPASS) {
+                    APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+            }
+            vTaskSuspend(m_accel_thread);
             break;
 
         case BLE_WORKOUT_DATA_EVT_CONNECTED:
+            NRF_LOG_INFO("WORKOUT EVENT: CONNECTED");
             break;
 
         case BLE_WORKOUT_DATA_EVT_DISCONNECTED:
+            NRF_LOG_INFO("WORKOUT EVENT: DISCONNECTED");
             break;
 
         default:
@@ -498,12 +437,11 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
  */
 static void services_init(void)
 {
-    ret_code_t         err_code;
-    ble_hrs_init_t     hrs_init;
-    ble_bas_init_t     bas_init;
-    ble_dis_init_t     dis_init;
-    nrf_ble_qwr_init_t qwr_init = {0};
-    uint8_t            body_sensor_location;
+    ret_code_t err_code;
+    ble_bas_init_t bas_init                     = {0};
+    ble_dis_init_t dis_init                     = {0};
+    nrf_ble_qwr_init_t qwr_init                 = {0};
+    ble_workout_data_init_t workout_data_init   = {0};
 
     // Initialize Queued Write Module.
     qwr_init.error_handler = nrf_qwr_error_handler;
@@ -511,49 +449,31 @@ static void services_init(void)
     err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init);
     APP_ERROR_CHECK(err_code);
 
-    // Initialize Heart Rate Service.
-    // body_sensor_location = BLE_HRS_BODY_SENSOR_LOCATION_FINGER;
-
-    // memset(&hrs_init, 0, sizeof(hrs_init));
-
-    // hrs_init.evt_handler                 = NULL;
-    // hrs_init.is_sensor_contact_supported = true;
-    // hrs_init.p_body_sensor_location      = &body_sensor_location;
-
-    // Here the sec level for the Heart Rate Service can be changed/increased.
-    // hrs_init.hrm_cccd_wr_sec = SEC_OPEN;
-    // hrs_init.bsl_rd_sec      = SEC_OPEN;
-
-    // err_code = ble_hrs_init(&m_hrs, &hrs_init);
-    // APP_ERROR_CHECK(err_code);
-
     // Initialize Battery Service.
-    // memset(&bas_init, 0, sizeof(bas_init));
 
-    // // Here the sec level for the Battery Service can be changed/increased.
-    // bas_init.bl_rd_sec        = SEC_OPEN;
-    // bas_init.bl_cccd_wr_sec   = SEC_OPEN;
-    // bas_init.bl_report_rd_sec = SEC_OPEN;
+    // Here the sec level for the Battery Service can be changed/increased.
+    bas_init.bl_rd_sec        = SEC_OPEN;
+    bas_init.bl_cccd_wr_sec   = SEC_OPEN;
+    bas_init.bl_report_rd_sec = SEC_OPEN;
 
-    // bas_init.evt_handler          = NULL;
-    // bas_init.support_notification = true;
-    // bas_init.p_report_ref         = NULL;
-    // bas_init.initial_batt_level   = 100;
+    bas_init.evt_handler          = NULL;
+    bas_init.support_notification = true;
+    bas_init.p_report_ref         = NULL;
+    bas_init.initial_batt_level   = 100;
 
-    // err_code = ble_bas_init(&m_bas, &bas_init);
-    // APP_ERROR_CHECK(err_code);
+    err_code = ble_bas_init(&m_bas, &bas_init);
+    APP_ERROR_CHECK(err_code);
 
-    // // Initialize Device Information Service.
-    // memset(&dis_init, 0, sizeof(dis_init));
+    // Initialize Device Information Service.
+    memset(&dis_init, 0, sizeof(dis_init));
 
-    // ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, (char *)MANUFACTURER_NAME);
+    ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, (char *)MANUFACTURER_NAME);
 
-    // dis_init.dis_char_rd_sec = SEC_OPEN;
+    dis_init.dis_char_rd_sec = SEC_OPEN;
 
-    // err_code = ble_dis_init(&dis_init);
-    // APP_ERROR_CHECK(err_code);
+    err_code = ble_dis_init(&dis_init);
+    APP_ERROR_CHECK(err_code);
 
-    ble_workout_data_init_t            workout_data_init;
 
     // Initialize workout data Service init structure to zero.
     memset(&workout_data_init, 0, sizeof(workout_data_init));
@@ -576,20 +496,6 @@ static void sensor_simulator_init(void)
     m_battery_sim_cfg.start_at_max = true;
 
     sensorsim_init(&m_battery_sim_state, &m_battery_sim_cfg);
-
-    m_heart_rate_sim_cfg.min          = MIN_HEART_RATE;
-    m_heart_rate_sim_cfg.max          = MAX_HEART_RATE;
-    m_heart_rate_sim_cfg.incr         = HEART_RATE_INCREMENT;
-    m_heart_rate_sim_cfg.start_at_max = false;
-
-    sensorsim_init(&m_heart_rate_sim_state, &m_heart_rate_sim_cfg);
-
-    m_rr_interval_sim_cfg.min          = MIN_RR_INTERVAL;
-    m_rr_interval_sim_cfg.max          = MAX_RR_INTERVAL;
-    m_rr_interval_sim_cfg.incr         = RR_INTERVAL_INCREMENT;
-    m_rr_interval_sim_cfg.start_at_max = false;
-
-    sensorsim_init(&m_rr_interval_sim_state, &m_rr_interval_sim_cfg);
 }
 
 
@@ -599,22 +505,10 @@ static void sensor_simulator_init(void)
 static void application_timers_start(void)
 {
     // Start application timers.
-    // if (pdPASS != xTimerStart(m_battery_timer, OSTIMER_WAIT_FOR_QUEUE))
-    // {
-    //     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    // }
-    // if (pdPASS != xTimerStart(m_heart_rate_timer, OSTIMER_WAIT_FOR_QUEUE))
-    // {
-    //     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    // }
-    // if (pdPASS != xTimerStart(m_rr_interval_timer, OSTIMER_WAIT_FOR_QUEUE))
-    // {
-    //     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    // }
-    // if (pdPASS != xTimerStart(m_sensor_contact_timer, OSTIMER_WAIT_FOR_QUEUE))
-    // {
-    //     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    // }
+    if (pdPASS != xTimerStart(m_battery_timer, OSTIMER_WAIT_FOR_QUEUE))
+    {
+        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+    }
 }
 
 
@@ -798,6 +692,13 @@ static void ble_stack_init(void)
     err_code = nrf_sdh_ble_default_cfg_set(APP_BLE_CONN_CFG_TAG, &ram_start);
     APP_ERROR_CHECK(err_code);
 
+    // ble_cfg_t ble_cfg = {0};
+    // ble_cfg.conn_cfg.conn_cfg_tag = APP_BLE_CONN_CFG_TAG;
+    // ble_cfg.conn_cfg.params.gattc_conn_cfg.write_cmd_tx_queue_size = 100;
+
+    // err_code = sd_ble_cfg_set(BLE_CONN_CFG_GATTC, &ble_cfg, ram_start);
+    // APP_ERROR_CHECK(err_code);
+
     // Enable BLE stack.
     err_code = nrf_sdh_ble_enable(&ram_start);
     APP_ERROR_CHECK(err_code);
@@ -867,10 +768,10 @@ static void peer_manager_init(void)
     sec_param.oob            = SEC_PARAM_OOB;
     sec_param.min_key_size   = SEC_PARAM_MIN_KEY_SIZE;
     sec_param.max_key_size   = SEC_PARAM_MAX_KEY_SIZE;
-    sec_param.kdist_own.enc  = 1;
-    sec_param.kdist_own.id   = 1;
-    sec_param.kdist_peer.enc = 1;
-    sec_param.kdist_peer.id  = 1;
+    sec_param.kdist_own.enc  = true;
+    sec_param.kdist_own.id   = true;
+    sec_param.kdist_peer.enc = true;
+    sec_param.kdist_peer.id  = true;
 
     err_code = pm_sec_params_set(&sec_param);
     APP_ERROR_CHECK(err_code);
@@ -900,12 +801,14 @@ static void advertising_init(void)
 
     memset(&init, 0, sizeof(init));
 
-    init.advdata.name_type               = BLE_ADVDATA_SHORT_NAME;
-    init.advdata.short_name_len          = 3;
-    init.advdata.include_appearance      = true;
-    init.advdata.flags                   = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
-    init.advdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
-    init.advdata.uuids_complete.p_uuids  = m_adv_uuids;
+    init.advdata.name_type                  = BLE_ADV_DATA_MATCH_FULL_NAME;
+    init.advdata.include_appearance         = true;
+    init.advdata.flags                      = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
+    init.advdata.uuids_complete.uuid_cnt    = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
+    init.advdata.uuids_complete.p_uuids     = m_adv_uuids;
+
+    init.srdata.uuids_complete.uuid_cnt     = sizeof(m_sr_uuids) / sizeof(m_sr_uuids[0]);
+    init.srdata.uuids_complete.p_uuids      = m_sr_uuids;
 
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
@@ -1027,8 +930,8 @@ static void accel_init(void)
     ret_code_t err_code;
 
     nrf_drv_twi_config_t const config = {
-       .scl                = SCL,
-       .sda                = SDA,
+       .scl                = LIS2DH12_SCL,
+       .sda                = LIS2DH12_SDA,
        .frequency          = NRF_DRV_TWI_FREQ_100K,
        .interrupt_priority = APP_IRQ_PRIORITY_LOWEST,
        .clear_bus_init     = false
@@ -1045,7 +948,7 @@ static void accel_init(void)
 static void int1_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
 {
     m_data_ready = true;
-    nrf_gpio_pin_clear(OUT_LED);
+    bsp_board_led_on(BSP_BOARD_LED_1);
 }
 
 static void gpio_init(void){
@@ -1054,69 +957,13 @@ static void gpio_init(void){
 	err_code = nrf_drv_gpiote_init();
 	APP_ERROR_CHECK(err_code);
 
-    nrf_gpio_cfg_output(CS);
-    nrf_gpio_pin_set(CS);
-
-    nrf_gpio_cfg_output(OUT_LED);
+    nrf_gpio_cfg_output(LIS2DH12_CS);
+    nrf_gpio_pin_set(LIS2DH12_CS);
 
     nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
-	err_code = nrf_drv_gpiote_in_init(INT1, &in_config, int1_pin_handler);
+	err_code = nrf_drv_gpiote_in_init(LIS2DH12_INT1, &in_config, int1_pin_handler);
 	APP_ERROR_CHECK(err_code);
-	nrf_drv_gpiote_in_event_enable(INT1, true);
-}
-
-static void acceleration_to_velocity(lis2dh12_data_t* m_accel_data, float* m_velocity, uint8_t samples){
-    uint8_t samples_to_read = 0;
-    for (uint8_t i = 0; i < samples; i++){
-        int16_t accel_x_mg = m_accel_data[i].x >> 4;
-        int16_t accel_y_mg = m_accel_data[i].y >> 4;
-        int16_t accel_z_mg = m_accel_data[i].z >> 4;
-        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
-        float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
-        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
-            samples_to_read = 3;
-        }
-        if(samples_to_read){
-            *m_velocity += accel_magnitude_cmpss * ACCEL_PERIOD;
-        } else {
-            *m_velocity = 0;
-            samples_to_read = MAX(samples_to_read - 1, 0);
-        }
-        // NRF_LOG_INFO("i:%d %d %d %d", i, accel_x_mg, accel_y_mg, accel_z_mg);
-        // NRF_LOG_INFO("Accel magnitude (mg): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mg));
-        // NRF_LOG_INFO("Accel magnitude (cm/s): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_cmpss));
-        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(*m_velocity));
-    }
-}
-
-static void accel_thread(void * arg)
-{
-    UNUSED_PARAMETER(arg);
-    ret_code_t err_code;
-
-    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_200HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
-    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, ACCEl_BUFFER_SIZE);
-    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, false, false, false, false, true, false, true, false);
-    LIS2DH12_FILTER_CFG(m_lis2dh12, LIS2DH12_FILTER_MODE_NORMAL, LIS2DH12_FILTER_FREQ_1, true, false, false, false);
-    
-    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
-    
-    APP_ERROR_CHECK(err_code);
-    
-    while (1)
-    {
-        vTaskDelay(1);
-
-        if(m_data_ready)
-        {
-            err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
-            APP_ERROR_CHECK(err_code);
-            acceleration_to_velocity(m_accel_data, &m_velocity, ACCEl_BUFFER_SIZE);
-
-            nrf_gpio_pin_set(OUT_LED);
-            m_data_ready = false;
-        }
-    }
+	nrf_drv_gpiote_in_event_enable(LIS2DH12_INT1, true);
 }
 
 /**@brief Function for application main entry.
@@ -1159,11 +1006,10 @@ int main(void)
     accel_init();
     application_timers_start();
 
+    erase_bonds = true;
 
-    if (pdPASS != xTaskCreate(accel_thread, "ACCEL", 256, NULL, 1, &m_accel_thread))
-    {
-        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    }
+    UNUSED_VARIABLE(xTaskCreate(accel_thread, "LED0", 256, NULL, 1, &m_accel_thread));
+    vTaskSuspend(m_accel_thread);
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
