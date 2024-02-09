@@ -129,15 +129,16 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define NOTIFICATION_INTERVAL               20                                     /**< Notificatio update interval */
+#define NOTIFICATION_INTERVAL               20                                      /**< Notificatio update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_ERROR_THRESHOLD               2.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
-#define ACCEL_PERIOD                        1.0f / 50.0f                            /**< Accel sampling period */
+#define ACCEL_PERIOD                        0.05f                                   /**< Accel sampling period */
+#define SAMPLE_TOLERANCE                    2                                       /**< Number of samples to use for velocity when valid sample is detected*/
 
-#define MG_TO_CMPS(MG)                      MG * 9.81f / 100.f                      /**< Converts from mg to cm/s^2 (centimeters per second)*/
+#define MG_TO_CMPS(MG)                      MG * 0.0981f                            /**< Converts from mg to cm/s^2 (centimeters per second)*/
 
 #define LIS2DH12_INT1                                25
 #define LIS2DH12_INT2                                26
@@ -191,7 +192,7 @@ static void update_velocity(){
         float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
         float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
         if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
-            samples_to_read = 3;
+            samples_to_read = SAMPLE_TOLERANCE;
         }
         if(samples_to_read){
             m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
@@ -220,11 +221,10 @@ static void accel_thread(void * arg)
     
     APP_ERROR_CHECK(err_code);
     
-    while (1)
+    for(;;)
     {
         __WFI();
-        if(m_data_ready)
-        {
+        if(m_data_ready) {
             err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
             APP_ERROR_CHECK(err_code);
             update_velocity();
@@ -1009,7 +1009,7 @@ int main(void)
     erase_bonds = true;
 
     UNUSED_VARIABLE(xTaskCreate(accel_thread, "LED0", 256, NULL, 1, &m_accel_thread));
-    vTaskSuspend(m_accel_thread);
+    // vTaskSuspend(m_accel_thread);
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
