@@ -98,7 +98,7 @@
 #define APP_BLE_CONN_CFG_TAG                1                                       /**< A tag identifying the SoftDevice BLE configuration. */
 
 #define APP_ADV_INTERVAL                    300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
-#define APP_ADV_DURATION                    18000                                       /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
+#define APP_ADV_DURATION                    18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
 #define BATTERY_LEVEL_MEAS_INTERVAL         2000                                    /**< Battery level measurement interval (ms). */
 #define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
@@ -167,6 +167,7 @@ static sensorsim_state_t m_battery_sim_state;                                   
 
 static ble_uuid_t m_adv_uuids[] = {                                                 /**< Universally unique service identifiers. */
     {BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
+    {BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE},
 };
 
 static ble_uuid_t m_sr_uuids[] = {
@@ -183,7 +184,26 @@ static TaskHandle_t m_accel_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
-static void update_velocity(){
+static void accel_on(void){
+    ret_code_t err_code;
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_200HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
+    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, ACCEl_BUFFER_SIZE);
+    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, false, false, false, false, true, false, true, false);
+    LIS2DH12_FILTER_CFG(m_lis2dh12, LIS2DH12_FILTER_MODE_NORMAL, LIS2DH12_FILTER_FREQ_1, true, false, false, false);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    
+    APP_ERROR_CHECK(err_code);
+}
+
+static void accel_off(void){
+    ret_code_t err_code;
+    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_POWERDOWN, false, true, true, true, LIS2DH12_SCALE_2G, true);
+    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
+    
+    APP_ERROR_CHECK(err_code);
+}
+
+static void update_velocity(void){
     uint8_t samples_to_read = 0;
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
         int16_t accel_x_mg = m_accel_data[i].x >> 4;
@@ -200,9 +220,6 @@ static void update_velocity(){
             m_velocity.data = 0;
             samples_to_read = MAX(samples_to_read - 1, 0);
         }
-        // NRF_LOG_INFO("i:%d %d %d %d", i, accel_x_mg, accel_y_mg, accel_z_mg);
-        // NRF_LOG_INFO("Accel magnitude (mg): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mg));
-        // NRF_LOG_INFO("Accel magnitude (cm/s): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_cmpss));
         NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
     }
 }
@@ -211,16 +228,7 @@ static void accel_thread(void * arg)
 {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
-
-    LIS2DH12_DATA_CFG(m_lis2dh12, LIS2DH12_ODR_200HZ, false, true, true, true, LIS2DH12_SCALE_2G, true);
-    LIS2DH12_FIFO_CFG(m_lis2dh12, true, LIS2DH12_STREAM, false, ACCEl_BUFFER_SIZE);
-    LIS2DH12_INT1_PIN_CFG(m_lis2dh12, false, false, false, false, true, false, true, false);
-    LIS2DH12_FILTER_CFG(m_lis2dh12, LIS2DH12_FILTER_MODE_NORMAL, LIS2DH12_FILTER_FREQ_1, true, false, false, false);
-    
-    err_code = lis2dh12_cfg_commit(&m_lis2dh12);
-    
-    APP_ERROR_CHECK(err_code);
-    
+    accel_off();
     for(;;)
     {
         __WFI();
@@ -405,7 +413,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
-            vTaskResume(m_accel_thread);
+            accel_on();
             break;
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
@@ -414,7 +422,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
-            vTaskSuspend(m_accel_thread);
+            accel_off();
             break;
 
         case BLE_WORKOUT_DATA_EVT_CONNECTED:
@@ -692,13 +700,6 @@ static void ble_stack_init(void)
     err_code = nrf_sdh_ble_default_cfg_set(APP_BLE_CONN_CFG_TAG, &ram_start);
     APP_ERROR_CHECK(err_code);
 
-    // ble_cfg_t ble_cfg = {0};
-    // ble_cfg.conn_cfg.conn_cfg_tag = APP_BLE_CONN_CFG_TAG;
-    // ble_cfg.conn_cfg.params.gattc_conn_cfg.write_cmd_tx_queue_size = 100;
-
-    // err_code = sd_ble_cfg_set(BLE_CONN_CFG_GATTC, &ble_cfg, ram_start);
-    // APP_ERROR_CHECK(err_code);
-
     // Enable BLE stack.
     err_code = nrf_sdh_ble_enable(&ram_start);
     APP_ERROR_CHECK(err_code);
@@ -894,25 +895,19 @@ static void logger_thread(void * arg)
 #endif //NRF_LOG_ENABLED
 
 #if NRF_LOG_ENABLED && NRF_LOG_DEFERRED
- void log_pending_hook( void )
- {
-     BaseType_t result = pdFAIL;
-
+void log_pending_hook( void )
+{
+    BaseType_t YieldRequired = pdFAIL;
     if ( __get_IPSR() != 0 )
     {
-        BaseType_t higherPriorityTaskWoken = pdFALSE;
-        result = xTaskNotifyFromISR( m_logger_thread, 0, eSetValueWithoutOverwrite, &higherPriorityTaskWoken );
-
-        if ( pdFAIL != result )
-        {
-        portYIELD_FROM_ISR( higherPriorityTaskWoken );
-        }
+        YieldRequired = xTaskResumeFromISR( m_logger_thread );
+        portYIELD_FROM_ISR( YieldRequired );
     }
     else
     {
-        UNUSED_RETURN_VALUE(xTaskNotify( m_logger_thread, 0, eSetValueWithoutOverwrite ));
+        UNUSED_RETURN_VALUE(vTaskResume(m_logger_thread));
     }
- }
+}
 #endif
 
 /**@brief Function for initializing the clock.
