@@ -41,9 +41,9 @@ struct ble_workout_data_s {
 };
 
 typedef struct {
-    ble_workout_data_evt_handler_t         evt_handler;                    /**< Event handler to be called for handling events in the Custom Service. */
-    float                       initial_custom_value;           /**< Initial custom value */
-    ble_srv_cccd_security_mode_t  custom_value_char_attr_md;     /**< Initial security level for Custom characteristics attribute */
+    ble_workout_data_evt_handler_t         evt_handler;             /**< Event handler to be called for handling events in the Custom Service. */
+    float                         initial_custom_value;             /**< Initial custom value */
+    ble_srv_cccd_security_mode_t  custom_value_char_attr_md;        /**< Initial security level for Custom characteristics attribute */
 } ble_workout_data_init_t;
 
 typedef union{
