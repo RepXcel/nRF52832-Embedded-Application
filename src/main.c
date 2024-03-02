@@ -107,8 +107,8 @@
 
 #define SENSOR_CONTACT_DETECTED_INTERVAL    5000                                    /**< Sensor Contact Detected toggle interval (ms). */
 
-#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.4 seconds). */
-#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.65 second). */
+#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)         /**< Minimum acceptable connection interval (0.4 seconds). */
+#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)         /**< Maximum acceptable connection interval (0.65 second). */
 #define SLAVE_LATENCY                       0                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                    MSEC_TO_UNITS(4000, UNIT_10_MS)         /**< Connection supervisory time-out (4 seconds). */
 
@@ -136,21 +136,25 @@
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_ERROR_THRESHOLD               2.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_PERIOD                        0.05f                                   /**< Accel sampling period */
-#define SAMPLE_TOLERANCE                    2                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define ACCEL_SAMPLE_TOLERANCE              2                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define REP_VELOCITY_MINIMUM                4.0f                                    /**< Minimum velocity for rep tracking*/         
+#define REP_VELOICTY_MOVING_THRESHOLD       60                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_CMPS(MG)                      MG * 0.0981f                            /**< Converts from mg to cm/s^2 (centimeters per second)*/
 
-#define LIS2DH12_INT1                                25
-#define LIS2DH12_INT2                                26
-#define LIS2DH12_CS                                  27
-#define LIS2DH12_SA0                                 28
-#define LIS2DH12_SDA                                 29
-#define LIS2DH12_SCL                                 30
+#define LIS2DH12_INT1                       25                                      /**< nRF52 Pin for LIS2DH12 INT1 */
+#define LIS2DH12_INT2                       26                                      /**< nRF52 Pin for LIS2DH12 INT2 */
+#define LIS2DH12_CS                         27                                      /**< nRF52 Pin for LIS2DH12 CS */
+#define LIS2DH12_SA0                        28                                      /**< nRF52 Pin for LIS2DH12 SA0 */
+#define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
+#define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
 
-typedef enum
+/* Device states for rep veloicty state machine */
+typedef enum                                                                        
 {
-    REST,
-    MOVING,
+    REST,                                                                           /**< Device not in motion, rep velocity not updated */
+    BEGIN_MOVING,                                                                   /**< Device in motion, rep velocity not updated */
+    MOVING,                                                                         /**< Device in motion, rep veloicty is updated */
 } device_state_t;
 
 BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
@@ -159,13 +163,13 @@ NRF_BLE_GATT_DEF(m_gatt);                                                       
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
-NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, ACCEl_BUFFER_SIZE);                 /**< TWI sensor instance. */
-LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);    /**< LIS2DH12 accel instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, ACCEl_BUFFER_SIZE);           /**< TWI sensor instance. */
+LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);   /**< LIS2DH12 accel instance. */
 BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static workout_data_t   m_velocity =  {0};                                         /**< Velocity value*/
+static workout_data_t   m_velocity =  {0};                                          /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 static device_state_t   m_device_state = REST;
 static float            m_rep_velocity = 0;
@@ -183,13 +187,13 @@ static ble_uuid_t m_sr_uuids[] = {
 };
 
 static TimerHandle_t m_battery_timer;                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_notif_timer;
+static TimerHandle_t m_ble_notif_timer;                             /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
 #endif
-static TaskHandle_t m_accel_thread;
-static TaskHandle_t m_rep_velocity_thread;
+static TaskHandle_t m_accel_thread;                                 /**< Definition of Accel thread. */
+static TaskHandle_t m_rep_velocity_thread;                          /**< Definition of Per Rep Velocity thread. */
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -220,14 +224,18 @@ static void update_velocity(void){
         int16_t accel_z_mg = m_accel_data[i].z >> 4;
         float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
         float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
-        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
+        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD) {
+            samples_to_read = ACCEL_SAMPLE_TOLERANCE;
+        }
+        if(samples_to_read){
             m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
         } else {
             m_velocity.data = 0;
+            samples_to_read = MAX(samples_to_read - 1, 0);
         }
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
         NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
-        NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_rep_velocity));
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity));
     }
 }
 
@@ -252,15 +260,28 @@ static void accel_thread(void * arg)
 static void rep_velocity_thread(void  * arg){
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
+    uint32_t sample_count = 0;
     float temp_rep_velocity = 0;
     for(;;)
     {
         switch(m_device_state){
             case REST:
-            if(m_velocity.data > 5){
+            if(m_velocity.data > REP_VELOCITY_MINIMUM){
                 temp_rep_velocity = 0;
+                sample_count = 0;
+                temp_rep_velocity = m_velocity.data;
+                m_device_state = BEGIN_MOVING;
+            }
+            break;
+
+            case BEGIN_MOVING:
+            if(m_velocity.data == 0){
+                m_device_state = REST;
+            } else if(sample_count == REP_VELOICTY_MOVING_THRESHOLD){
                 m_device_state = MOVING;
             }
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity.data);
+            sample_count++;
             break;
 
             case MOVING:
@@ -268,7 +289,7 @@ static void rep_velocity_thread(void  * arg){
                 m_rep_velocity = temp_rep_velocity;
                 m_device_state = REST;
             }
-            temp_rep_velocity = fmax(temp_rep_velocity, m_velocity.data); 
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity.data); 
             break;
 
             default:
