@@ -147,6 +147,12 @@
 #define LIS2DH12_SDA                                 29
 #define LIS2DH12_SCL                                 30
 
+typedef enum
+{
+    REST,
+    MOVING,
+} device_state_t;
+
 BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
 BLE_HRS_DEF(m_hrs);                                                                 /**< Heart rate service instance. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
@@ -161,6 +167,8 @@ static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
 static workout_data_t   m_velocity =  {0};                                         /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
+static device_state_t   m_device_state = REST;
+static float            m_rep_velocity = 0;
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
 static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
@@ -181,6 +189,7 @@ static TimerHandle_t m_ble_notif_timer;
 static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
 #endif
 static TaskHandle_t m_accel_thread;
+static TaskHandle_t m_rep_velocity_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -212,15 +221,13 @@ static void update_velocity(void){
         float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
         float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
         if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
-            samples_to_read = SAMPLE_TOLERANCE;
-        }
-        if(samples_to_read){
             m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
         } else {
             m_velocity.data = 0;
-            samples_to_read = MAX(samples_to_read - 1, 0);
         }
+        UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
         NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
+        NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_rep_velocity));
     }
 }
 
@@ -228,7 +235,7 @@ static void accel_thread(void * arg)
 {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
-    accel_off();
+    accel_on();
     for(;;)
     {
         __WFI();
@@ -236,10 +243,38 @@ static void accel_thread(void * arg)
             err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
             APP_ERROR_CHECK(err_code);
             update_velocity();
-
             bsp_board_led_off(BSP_BOARD_LED_1);
             m_data_ready = false;
         }
+    }
+}
+
+static void rep_velocity_thread(void  * arg){
+    UNUSED_PARAMETER(arg);
+    ret_code_t err_code;
+    float temp_rep_velocity = 0;
+    for(;;)
+    {
+        switch(m_device_state){
+            case REST:
+            if(m_velocity.data > 5){
+                temp_rep_velocity = 0;
+                m_device_state = MOVING;
+            }
+            break;
+
+            case MOVING:
+            if(m_velocity.data == 0){
+                m_rep_velocity = temp_rep_velocity;
+                m_device_state = REST;
+            }
+            temp_rep_velocity = fmax(temp_rep_velocity, m_velocity.data); 
+            break;
+
+            default:
+            break;
+        }
+        vTaskSuspend(NULL);
     }
 }
 
@@ -1003,8 +1038,8 @@ int main(void)
 
     erase_bonds = true;
 
-    UNUSED_VARIABLE(xTaskCreate(accel_thread, "LED0", 256, NULL, 1, &m_accel_thread));
-    // vTaskSuspend(m_accel_thread);
+    UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
+    UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 1, &m_rep_velocity_thread));
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
