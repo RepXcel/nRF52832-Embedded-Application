@@ -169,10 +169,10 @@ BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static workout_data_t   m_velocity =  {0};                                          /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 static device_state_t   m_device_state = REST;
-static float            m_rep_velocity = 0;
+static float            m_velocity =  0;                                          /**< Velocity value*/
+static workout_data_t   m_rep_velocity = {0};
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
 static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
@@ -228,14 +228,14 @@ static void update_velocity(void){
             samples_to_read = ACCEL_SAMPLE_TOLERANCE;
         }
         if(samples_to_read){
-            m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
+            m_velocity += accel_magnitude_cmpss * ACCEL_PERIOD;
         } else {
-            m_velocity.data = 0;
+            m_velocity = 0;
             samples_to_read = MAX(samples_to_read - 1, 0);
         }
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
-        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity));
+        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data));
     }
 }
 
@@ -266,30 +266,30 @@ static void rep_velocity_thread(void  * arg){
     {
         switch(m_device_state){
             case REST:
-            if(m_velocity.data > REP_VELOCITY_MINIMUM){
+            if(m_velocity > REP_VELOCITY_MINIMUM){
                 temp_rep_velocity = 0;
                 sample_count = 0;
-                temp_rep_velocity = m_velocity.data;
+                temp_rep_velocity = m_velocity;
                 m_device_state = BEGIN_MOVING;
             }
             break;
 
             case BEGIN_MOVING:
-            if(m_velocity.data == 0){
+            if(m_velocity == 0){
                 m_device_state = REST;
             } else if(sample_count == REP_VELOICTY_MOVING_THRESHOLD){
                 m_device_state = MOVING;
             }
-            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity.data);
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity);
             sample_count++;
             break;
 
             case MOVING:
-            if(m_velocity.data == 0){
-                m_rep_velocity = temp_rep_velocity;
+            if(m_velocity == 0){
+                m_rep_velocity.data = temp_rep_velocity;
                 m_device_state = REST;
             }
-            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity.data); 
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity); 
             break;
 
             default:
@@ -380,7 +380,7 @@ static void notification_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_velocity);
+    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_rep_velocity);
     APP_ERROR_CHECK(err_code);
 }
 
