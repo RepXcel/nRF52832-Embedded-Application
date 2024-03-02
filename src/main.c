@@ -105,8 +105,6 @@
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
 
-#define SENSOR_CONTACT_DETECTED_INTERVAL    5000                                    /**< Sensor Contact Detected toggle interval (ms). */
-
 #define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)         /**< Minimum acceptable connection interval (0.4 seconds). */
 #define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)         /**< Maximum acceptable connection interval (0.65 second). */
 #define SLAVE_LATENCY                       0                                       /**< Slave latency. */
@@ -171,7 +169,7 @@ static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 static device_state_t   m_device_state = REST;
-static float            m_velocity =  0;                                          /**< Velocity value*/
+static float            m_velocity = 0;                                          /**< Velocity value*/
 static workout_data_t   m_rep_velocity = {0};
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
@@ -183,17 +181,17 @@ static ble_uuid_t m_adv_uuids[] = {                                             
 };
 
 static ble_uuid_t m_sr_uuids[] = {
-    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}               /**< Universally unique service identifiers. */
+    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}                               /**< Universally unique service identifiers. */
 };
 
-static TimerHandle_t m_battery_timer;                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_notif_timer;                             /**< Definition of notification timer. */
+static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
+static TimerHandle_t m_ble_notif_timer;                                             /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
-static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
+static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
 #endif
-static TaskHandle_t m_accel_thread;                                 /**< Definition of Accel thread. */
-static TaskHandle_t m_rep_velocity_thread;                          /**< Definition of Per Rep Velocity thread. */
+static TaskHandle_t m_accel_thread;                                                 /**< Definition of Accel thread. */
+static TaskHandle_t m_rep_velocity_thread;                                          /**< Definition of Per Rep Velocity thread. */
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -217,13 +215,17 @@ static void accel_off(void){
 }
 
 static void update_velocity(void){
-    uint8_t samples_to_read = 0;
+    uint8_t samples_to_read;
+    int16_t accel_x_mg, accel_y_mg, accel_z_mg;
+    float accel_magnitude_mg, accel_magnitude_cmpss;
+
+    samples_to_read = 0;
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
-        int16_t accel_x_mg = m_accel_data[i].x >> 4;
-        int16_t accel_y_mg = m_accel_data[i].y >> 4;
-        int16_t accel_z_mg = m_accel_data[i].z >> 4;
-        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
-        float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
+        accel_x_mg = m_accel_data[i].x >> 4;
+        accel_y_mg = m_accel_data[i].y >> 4;
+        accel_z_mg = m_accel_data[i].z >> 4;
+        accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
+        accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
         if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD) {
             samples_to_read = ACCEL_SAMPLE_TOLERANCE;
         }
@@ -993,7 +995,6 @@ static void accel_init(void)
     APP_ERROR_CHECK(err_code);
     err_code = lis2dh12_init(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
-    accel_off();
 }
 
 static void int1_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
@@ -1060,7 +1061,7 @@ int main(void)
     erase_bonds = true;
 
     UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
-    UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 1, &m_rep_velocity_thread));
+    UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread));
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
