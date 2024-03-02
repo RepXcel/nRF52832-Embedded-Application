@@ -995,6 +995,7 @@ static void accel_init(void)
     APP_ERROR_CHECK(err_code);
     err_code = lis2dh12_init(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
+    accel_off();
 }
 
 static void int1_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
