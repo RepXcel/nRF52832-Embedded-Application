@@ -288,7 +288,7 @@ static void rep_velocity_thread(void  * arg){
             case MOVING:
             if(m_velocity == 0){
                 m_rep_velocity.data.velocity = temp_rep_velocity;
-                // m_rep_velocity.data.timestamp += 1;
+                m_rep_velocity.data.timestamp += 1;
                 m_device_state = REST;
             }
             temp_rep_velocity = MAX(temp_rep_velocity, m_velocity); 

@@ -48,7 +48,7 @@ typedef struct {
 
 typedef struct{
     float       velocity;
-    // uint32_t    timestamp;
+    uint32_t    timestamp;
 } velocity_ts_t;
 
 typedef union{
