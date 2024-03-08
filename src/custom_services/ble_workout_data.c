@@ -6,6 +6,15 @@
 #include "boards.h"
 #include "nrf_log.h"
 
+static void reverse_endianess(workout_data_t * p_data){
+    uint32_t num_bytes = sizeof(workout_data_t);
+    for(uint8_t i = 0; i < num_bytes/2; i++){
+        uint8_t temp = p_data->byte_array[i];
+        p_data->byte_array[i] = p_data->byte_array[num_bytes-1-i];
+        p_data->byte_array[num_bytes-1-i] = temp;
+    }
+}
+
 static void on_connect(ble_workout_data_t * p_workout_data, ble_evt_t const * p_ble_evt)
 {
     p_workout_data->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
@@ -139,7 +148,7 @@ ret_code_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_d
 
     ret_code_t err_code = NRF_SUCCESS;
     ble_gatts_value_t gatts_value = {0};
-
+    reverse_endianess(&custom_value);
     gatts_value.len     = sizeof(workout_data_t);
     gatts_value.offset  = 0;
     gatts_value.p_value = custom_value.byte_array;

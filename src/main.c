@@ -236,8 +236,8 @@ static void update_velocity(void){
             samples_to_read = MAX(samples_to_read - 1, 0);
         }
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
-        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data));
+        // NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
     }
 }
 
@@ -287,7 +287,8 @@ static void rep_velocity_thread(void  * arg){
 
             case MOVING:
             if(m_velocity == 0){
-                m_rep_velocity.data = temp_rep_velocity;
+                m_rep_velocity.data.velocity = temp_rep_velocity;
+                // m_rep_velocity.data.timestamp += 1;
                 m_device_state = REST;
             }
             temp_rep_velocity = MAX(temp_rep_velocity, m_velocity); 
@@ -543,7 +544,7 @@ static void services_init(void)
     // Initialize workout data Service init structure to zero.
     memset(&workout_data_init, 0, sizeof(workout_data_init));
     
-    workout_data_init.evt_handler                = on_workout_data_evt;
+    workout_data_init.evt_handler = on_workout_data_evt;
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&workout_data_init.custom_value_char_attr_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&workout_data_init.custom_value_char_attr_md.write_perm);
 
