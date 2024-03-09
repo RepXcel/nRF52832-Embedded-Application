@@ -105,10 +105,8 @@
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
 
-#define SENSOR_CONTACT_DETECTED_INTERVAL    5000                                    /**< Sensor Contact Detected toggle interval (ms). */
-
-#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.4 seconds). */
-#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.65 second). */
+#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)         /**< Minimum acceptable connection interval (0.4 seconds). */
+#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)         /**< Maximum acceptable connection interval (0.65 second). */
 #define SLAVE_LATENCY                       0                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                    MSEC_TO_UNITS(4000, UNIT_10_MS)         /**< Connection supervisory time-out (4 seconds). */
 
@@ -136,16 +134,26 @@
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_ERROR_THRESHOLD               2.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_PERIOD                        0.05f                                   /**< Accel sampling period */
-#define SAMPLE_TOLERANCE                    2                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define ACCEL_SAMPLE_TOLERANCE              2                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define REP_VELOCITY_MINIMUM                4.0f                                    /**< Minimum velocity for rep tracking*/         
+#define REP_VELOICTY_MOVING_THRESHOLD       60                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_CMPS(MG)                      MG * 0.0981f                            /**< Converts from mg to cm/s^2 (centimeters per second)*/
 
-#define LIS2DH12_INT1                                25
-#define LIS2DH12_INT2                                26
-#define LIS2DH12_CS                                  27
-#define LIS2DH12_SA0                                 28
-#define LIS2DH12_SDA                                 29
-#define LIS2DH12_SCL                                 30
+#define LIS2DH12_INT1                       25                                      /**< nRF52 Pin for LIS2DH12 INT1 */
+#define LIS2DH12_INT2                       26                                      /**< nRF52 Pin for LIS2DH12 INT2 */
+#define LIS2DH12_CS                         27                                      /**< nRF52 Pin for LIS2DH12 CS */
+#define LIS2DH12_SA0                        28                                      /**< nRF52 Pin for LIS2DH12 SA0 */
+#define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
+#define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
+
+/* Device states for rep veloicty state machine */
+typedef enum                                                                        
+{
+    REST,                                                                           /**< Device not in motion, rep velocity not updated */
+    BEGIN_MOVING,                                                                   /**< Device in motion, rep velocity not updated */
+    MOVING,                                                                         /**< Device in motion, rep veloicty is updated */
+} device_state_t;
 
 BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
 BLE_HRS_DEF(m_hrs);                                                                 /**< Heart rate service instance. */
@@ -153,14 +161,16 @@ NRF_BLE_GATT_DEF(m_gatt);                                                       
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 NRF_TWI_MNGR_DEF(m_nrf_twi_mngr, MAX_PENDING_TRANSACTIONS, TWI_INSTANCE_ID);        /**< TWI manager instance. */
-NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, ACCEl_BUFFER_SIZE);                 /**< TWI sensor instance. */
-LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);    /**< LIS2DH12 accel instance. */
+NRF_TWI_SENSOR_DEF(m_nrf_twi_sensor, &m_nrf_twi_mngr, ACCEl_BUFFER_SIZE);           /**< TWI sensor instance. */
+LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH);   /**< LIS2DH12 accel instance. */
 BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static workout_data_t   m_velocity =  {0};                                         /**< Velocity value*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
+static device_state_t   m_device_state = REST;
+static float            m_velocity = 0;                                          /**< Velocity value*/
+static workout_data_t   m_rep_velocity = {0};
 
 static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
 static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
@@ -171,16 +181,17 @@ static ble_uuid_t m_adv_uuids[] = {                                             
 };
 
 static ble_uuid_t m_sr_uuids[] = {
-    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}               /**< Universally unique service identifiers. */
+    {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}                               /**< Universally unique service identifiers. */
 };
 
-static TimerHandle_t m_battery_timer;                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_notif_timer;
+static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
+static TimerHandle_t m_ble_notif_timer;                                             /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
-static TaskHandle_t m_logger_thread;                                /**< Definition of Logger thread. */
+static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
 #endif
-static TaskHandle_t m_accel_thread;
+static TaskHandle_t m_accel_thread;                                                 /**< Definition of Accel thread. */
+static TaskHandle_t m_rep_velocity_thread;                                          /**< Definition of Per Rep Velocity thread. */
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -204,23 +215,29 @@ static void accel_off(void){
 }
 
 static void update_velocity(void){
-    uint8_t samples_to_read = 0;
+    uint8_t samples_to_read;
+    int16_t accel_x_mg, accel_y_mg, accel_z_mg;
+    float accel_magnitude_mg, accel_magnitude_cmpss;
+
+    samples_to_read = 0;
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
-        int16_t accel_x_mg = m_accel_data[i].x >> 4;
-        int16_t accel_y_mg = m_accel_data[i].y >> 4;
-        int16_t accel_z_mg = m_accel_data[i].z >> 4;
-        float accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
-        float accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
-        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD){
-            samples_to_read = SAMPLE_TOLERANCE;
+        accel_x_mg = m_accel_data[i].x >> 4;
+        accel_y_mg = m_accel_data[i].y >> 4;
+        accel_z_mg = m_accel_data[i].z >> 4;
+        accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
+        accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
+        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD) {
+            samples_to_read = ACCEL_SAMPLE_TOLERANCE;
         }
         if(samples_to_read){
-            m_velocity.data += accel_magnitude_cmpss * ACCEL_PERIOD;
+            m_velocity += accel_magnitude_cmpss * ACCEL_PERIOD;
         } else {
-            m_velocity.data = 0;
+            m_velocity = 0;
             samples_to_read = MAX(samples_to_read - 1, 0);
         }
-        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity.data));
+        UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
+        // NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
     }
 }
 
@@ -228,7 +245,6 @@ static void accel_thread(void * arg)
 {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
-    accel_off();
     for(;;)
     {
         __WFI();
@@ -236,10 +252,52 @@ static void accel_thread(void * arg)
             err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
             APP_ERROR_CHECK(err_code);
             update_velocity();
-
             bsp_board_led_off(BSP_BOARD_LED_1);
             m_data_ready = false;
         }
+    }
+}
+
+static void rep_velocity_thread(void  * arg){
+    UNUSED_PARAMETER(arg);
+    ret_code_t err_code;
+    uint32_t sample_count = 0;
+    float temp_rep_velocity = 0;
+    for(;;)
+    {
+        switch(m_device_state){
+            case REST:
+            if(m_velocity > REP_VELOCITY_MINIMUM){
+                temp_rep_velocity = 0;
+                sample_count = 0;
+                temp_rep_velocity = m_velocity;
+                m_device_state = BEGIN_MOVING;
+            }
+            break;
+
+            case BEGIN_MOVING:
+            if(m_velocity == 0){
+                m_device_state = REST;
+            } else if(sample_count == REP_VELOICTY_MOVING_THRESHOLD){
+                m_device_state = MOVING;
+            }
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity);
+            sample_count++;
+            break;
+
+            case MOVING:
+            if(m_velocity == 0){
+                m_rep_velocity.data.velocity = temp_rep_velocity;
+                m_rep_velocity.data.timestamp += 1;
+                m_device_state = REST;
+            }
+            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity); 
+            break;
+
+            default:
+            break;
+        }
+        vTaskSuspend(NULL);
     }
 }
 
@@ -324,7 +382,7 @@ static void notification_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_velocity);
+    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_rep_velocity);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -486,7 +544,7 @@ static void services_init(void)
     // Initialize workout data Service init structure to zero.
     memset(&workout_data_init, 0, sizeof(workout_data_init));
     
-    workout_data_init.evt_handler                = on_workout_data_evt;
+    workout_data_init.evt_handler = on_workout_data_evt;
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&workout_data_init.custom_value_char_attr_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&workout_data_init.custom_value_char_attr_md.write_perm);
 
@@ -938,6 +996,7 @@ static void accel_init(void)
     APP_ERROR_CHECK(err_code);
     err_code = lis2dh12_init(&m_lis2dh12);
     APP_ERROR_CHECK(err_code);
+    accel_off();
 }
 
 static void int1_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
@@ -1003,8 +1062,8 @@ int main(void)
 
     erase_bonds = true;
 
-    UNUSED_VARIABLE(xTaskCreate(accel_thread, "LED0", 256, NULL, 1, &m_accel_thread));
-    // vTaskSuspend(m_accel_thread);
+    UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
+    UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread));
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.

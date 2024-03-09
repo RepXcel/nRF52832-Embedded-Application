@@ -46,9 +46,14 @@ typedef struct {
     ble_srv_cccd_security_mode_t  custom_value_char_attr_md;        /**< Initial security level for Custom characteristics attribute */
 } ble_workout_data_init_t;
 
+typedef struct{
+    float       velocity;
+    uint32_t    timestamp;
+} velocity_ts_t;
+
 typedef union{
-    float   data;
-    uint8_t byte_array[sizeof(float)];
+    velocity_ts_t   data;
+    uint8_t         byte_array[sizeof(velocity_ts_t)];
 } workout_data_t;
 
 ret_code_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_workout_data_init_t * p_workout_data_init);
