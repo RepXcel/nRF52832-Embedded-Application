@@ -147,6 +147,10 @@
 #define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
 #define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
 
+#define ledGreen 11
+#define ledBlue 12
+#define ledRed 13
+
 /* Device states for rep veloicty state machine */
 typedef enum                                                                        
 {
@@ -192,6 +196,7 @@ static TaskHandle_t m_logger_thread;                                            
 #endif
 static TaskHandle_t m_accel_thread;                                                 /**< Definition of Accel thread. */
 static TaskHandle_t m_rep_velocity_thread;                                          /**< Definition of Per Rep Velocity thread. */
+static TaskHandle_t m_led_cycle_thread;
 
 static void advertising_start(void * p_erase_bonds);
 
@@ -298,6 +303,18 @@ static void rep_velocity_thread(void  * arg){
             break;
         }
         vTaskSuspend(NULL);
+    }
+}
+
+static void led_cycle_thread(void  * arg) {
+    UNUSED_PARAMETER(arg);
+    for(;;) {
+        for (int i = 0; i < 8; i++) {
+                nrf_gpio_pin_write(ledRed, i & 0x1);
+                nrf_gpio_pin_write(ledGreen, (i >> 1) & 0x1);
+                nrf_gpio_pin_write(ledBlue, (i >> 2) & 0x1);
+                vTaskDelay(1000);
+        }
     }
 }
 
@@ -1018,6 +1035,10 @@ static void gpio_init(void){
 	err_code = nrf_drv_gpiote_in_init(LIS2DH12_INT1, &in_config, int1_pin_handler);
 	APP_ERROR_CHECK(err_code);
 	nrf_drv_gpiote_in_event_enable(LIS2DH12_INT1, true);
+
+    nrf_gpio_cfg_output(ledGreen);
+    nrf_gpio_cfg_output(ledBlue);
+    nrf_gpio_cfg_output(ledRed);
 }
 
 /**@brief Function for application main entry.
@@ -1064,6 +1085,8 @@ int main(void)
 
     UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
     UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread));
+    // UNUSED_VARIABLE(xTaskCreate(led_cycle_thread, "led", 256, NULL, 2, &m_led_cycle_thread));
+
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
@@ -1072,7 +1095,6 @@ int main(void)
     NRF_LOG_INFO("HRS FreeRTOS example started.");
     // Start FreeRTOS scheduler.
     vTaskStartScheduler();
-
     for (;;)
     {
         APP_ERROR_HANDLER(NRF_ERROR_FORBIDDEN);
