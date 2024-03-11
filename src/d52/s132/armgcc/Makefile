@@ -47,7 +47,6 @@ SRC_FILES += \
   $(SDK_ROOT)/components/libraries/ringbuf/nrf_ringbuf.c \
   $(SDK_ROOT)/components/libraries/experimental_section_vars/nrf_section_iter.c \
   $(SDK_ROOT)/components/libraries/strerror/nrf_strerror.c \
-  $(SDK_ROOT)/components/libraries/sensorsim/sensorsim.c \
   $(SDK_ROOT)/modules/nrfx/mdk/system_nrf52.c \
   $(SDK_ROOT)/external/freertos/source/croutine.c \
   $(SDK_ROOT)/external/freertos/source/event_groups.c \
@@ -67,6 +66,7 @@ SRC_FILES += \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_clock.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_gpiote.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/prs/nrfx_prs.c \
+  $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_saadc.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uart.c \
   $(SDK_ROOT)/modules/nrfx/drivers/src/nrfx_uarte.c \
   $(SDK_ROOT)/components/libraries/bsp/bsp.c \
@@ -211,7 +211,6 @@ INC_FOLDERS += \
   $(SDK_ROOT)/external/freertos/source/include \
   $(SDK_ROOT)/components/nfc/ndef/connection_handover/ble_pair_msg \
   $(SDK_ROOT)/components/libraries/usbd/class/audio \
-  $(SDK_ROOT)/components/libraries/sensorsim \
   $(SDK_ROOT)/components/nfc/t4t_lib \
   $(SDK_ROOT)/components/ble/peer_manager \
   $(SDK_ROOT)/components/libraries/mem_manager \

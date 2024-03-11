@@ -52,6 +52,7 @@
 #include "math.h"
 #include "nordic_common.h"
 #include "nrf.h"
+#include "nrf_drv_saadc.h"
 #include "app_error.h"
 #include "ble.h"
 #include "ble_hci.h"
@@ -63,7 +64,6 @@
 #include "ble_dis.h"
 #include "ble_conn_params.h"
 #include "lis2dh12.h"
-#include "sensorsim.h"
 #include "nrf_gpio.h"
 #include "nrf_twi_mngr.h"
 #include "nrf_sdh.h"
@@ -71,6 +71,7 @@
 #include "nrf_sdh_ble.h"
 #include "nrf_sdh_freertos.h"
 #include "app_timer.h"
+#include "app_util.h"
 #include "peer_manager.h"
 #include "peer_manager_handler.h"
 #include "bsp_btn_ble.h"
@@ -100,7 +101,7 @@
 #define APP_ADV_INTERVAL                    300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 #define APP_ADV_DURATION                    18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
-#define BATTERY_LEVEL_MEAS_INTERVAL         2000                                    /**< Battery level measurement interval (ms). */
+#define BATTERY_LEVEL_MEAS_INTERVAL         10000                                   /**< Battery level measurement interval (ms). */
 #define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
@@ -127,7 +128,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define NOTIFICATION_INTERVAL               20                                      /**< Notificatio update interval */
+#define WORKOUT_DATA_NOTIFICATION_INTERVAL  20                                      /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
@@ -146,6 +147,20 @@
 #define LIS2DH12_SA0                        28                                      /**< nRF52 Pin for LIS2DH12 SA0 */
 #define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
 #define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
+
+/**@brief Macro to convert the result of ADC conversion in millivolts.
+ *
+ * @param[in]  ADC_VALUE   ADC result.
+ *
+ * @retval     Result converted to millivolts.
+ */
+#define ADC_RESULT_IN_MILLI_VOLTS(ADC_VALUE)\
+        ((((ADC_VALUE) * ADC_REF_VOLTAGE_IN_MILLIVOLTS) / ADC_RES_10BIT) * ADC_PRE_SCALING_COMPENSATION)
+
+#define ADC_REF_VOLTAGE_IN_MILLIVOLTS   600                                     /**< Reference voltage (in milli volts) used by ADC while doing conversion. */
+#define ADC_PRE_SCALING_COMPENSATION    6                                       /**< The ADC is configured to use VDD with 1/3 prescaling as input. And hence the result of conversion is to be multiplied by 3 to get the actual value of the battery voltage.*/
+#define DIODE_FWD_VOLT_DROP_MILLIVOLTS  270                                     /**< Typical forward voltage drop of the diode . */
+#define ADC_RES_10BIT                   1024                                    /**< Maximum digital value for 10-bit ADC conversion. */
 
 /* Device states for rep veloicty state machine */
 typedef enum                                                                        
@@ -169,11 +184,10 @@ static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 static device_state_t   m_device_state = REST;
-static float            m_velocity = 0;                                          /**< Velocity value*/
+static float            m_velocity = 0;                                             /**< Velocity value*/
 static workout_data_t   m_rep_velocity = {0};
 
-static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
-static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
+static nrf_saadc_value_t adc_buf[2];                                                /**< SAADC buffer */
 
 static ble_uuid_t m_adv_uuids[] = {                                                 /**< Universally unique service identifiers. */
     {BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
@@ -185,7 +199,7 @@ static ble_uuid_t m_sr_uuids[] = {
 };
 
 static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_notif_timer;                                             /**< Definition of notification timer. */
+static TimerHandle_t m_ble_workout_data_notif_timer;                                             /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
@@ -341,48 +355,84 @@ static void pm_evt_handler(pm_evt_t const * p_evt)
     }
 }
 
-/**@brief Function for performing battery measurement and updating the Battery Level characteristic
- *        in Battery Service.
+/**@brief Function for handling the ADC interrupt.
+ *
+ * @details  This function will fetch the conversion result from the ADC, convert the value into
+ *           percentage and send it to peer.
  */
-static void battery_level_update(void)
+void saadc_event_handler(nrf_drv_saadc_evt_t const * p_event)
 {
-    ret_code_t err_code;
-    uint8_t  battery_level;
-
-    battery_level = (uint8_t)sensorsim_measure(&m_battery_sim_state, &m_battery_sim_cfg);
-
-    err_code = ble_bas_battery_level_update(&m_bas, battery_level, BLE_CONN_HANDLE_ALL);
-    if ((err_code != NRF_SUCCESS) &&
-        (err_code != NRF_ERROR_INVALID_STATE) &&
-        (err_code != NRF_ERROR_RESOURCES) &&
-        (err_code != NRF_ERROR_BUSY) &&
-        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
-       )
+    if (p_event->type == NRF_DRV_SAADC_EVT_DONE)
     {
-        APP_ERROR_HANDLER(err_code);
+        nrf_saadc_value_t adc_result;
+        uint16_t          batt_lvl_in_milli_volts;
+        uint8_t           percentage_batt_lvl;
+        uint32_t          err_code;
+
+        adc_result = p_event->data.done.p_buffer[0];
+
+        err_code = nrf_drv_saadc_buffer_convert(p_event->data.done.p_buffer, 1);
+        APP_ERROR_CHECK(err_code);
+
+        batt_lvl_in_milli_volts = ADC_RESULT_IN_MILLI_VOLTS(adc_result) +
+                                  DIODE_FWD_VOLT_DROP_MILLIVOLTS;
+        percentage_batt_lvl = battery_level_in_percent(batt_lvl_in_milli_volts);
+
+        err_code = ble_bas_battery_level_update(&m_bas, percentage_batt_lvl, BLE_CONN_HANDLE_ALL);
+        if ((err_code != NRF_SUCCESS) &&
+            (err_code != NRF_ERROR_INVALID_STATE) &&
+            (err_code != NRF_ERROR_RESOURCES) &&
+            (err_code != NRF_ERROR_BUSY) &&
+            (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
+           )
+        {
+            APP_ERROR_HANDLER(err_code);
+        }
+        // NRF_LOG_INFO("Battery percent: %d", percentage_batt_lvl);
     }
 }
 
-
-/**@brief Function for handling the Battery measurement timer time-out.
- *
- * @details This function will be called each time the battery level measurement timer expires.
- *
- * @param[in] xTimer Handler to the timer that called this function.
- *                   You may get identifier given to the function xTimerCreate using pvTimerGetTimerID.
+/**@brief Function for configuring ADC to do battery level conversion.
  */
-static void battery_level_meas_timeout_handler(TimerHandle_t xTimer)
+static void adc_configure(void)
 {
-    UNUSED_PARAMETER(xTimer);
-    battery_level_update();
+    ret_code_t err_code = nrf_drv_saadc_init(NULL, saadc_event_handler);
+    APP_ERROR_CHECK(err_code);
+
+    nrf_saadc_channel_config_t config =
+        NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_VDD);
+    err_code = nrf_drv_saadc_channel_init(0, &config);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_drv_saadc_buffer_convert(&adc_buf[0], 1);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_drv_saadc_buffer_convert(&adc_buf[1], 1);
+    APP_ERROR_CHECK(err_code);
 }
 
+/**@brief Function for handling the Battery measurement timer timeout.
+ *
+ * @details This function will be called each time the battery level measurement timer expires.
+ *          This function will start the ADC.
+ *
+ * @param[in] p_context   Pointer used for passing some arbitrary information (context) from the
+ *                        app_start_timer() call to the timeout handler.
+ */
+static void battery_level_meas_timeout_handler(void * p_context)
+{
+    UNUSED_PARAMETER(p_context);
 
-static void notification_timeout_handler(void * p_context)
+    ret_code_t err_code;
+    err_code = nrf_drv_saadc_sample();
+    APP_ERROR_CHECK(err_code);
+}
+
+static void workout_data_notification_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_rep_velocity);
+    err_code = ble_workout_data_value_update(&m_workout_data, m_rep_velocity);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -397,7 +447,7 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 
     // Create timers.
-    m_ble_notif_timer = xTimerCreate("WKT", NOTIFICATION_INTERVAL, pdTRUE, NULL, notification_timeout_handler);
+    m_ble_workout_data_notif_timer = xTimerCreate("WKT", WORKOUT_DATA_NOTIFICATION_INTERVAL, pdTRUE, NULL, workout_data_notification_timeout_handler);
     m_battery_timer = xTimerCreate("BATT",
                                    BATTERY_LEVEL_MEAS_INTERVAL,
                                    pdTRUE,
@@ -467,7 +517,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
     {
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED:
             NRF_LOG_INFO("WORKOUT EVENT: NOTIF ENABLED");
-            xReturn = xTimerStart(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            xReturn = xTimerStart(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
@@ -476,7 +526,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
             NRF_LOG_INFO("WORKOUT EVENT: NOTIF DISABLED");
-            xReturn = xTimerStop(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            xReturn = xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
@@ -551,19 +601,6 @@ static void services_init(void)
     err_code = ble_workout_data_init(&m_workout_data, &workout_data_init);
     APP_ERROR_CHECK(err_code);	
 }
-
-
-/**@brief Function for initializing the sensor simulators. */
-static void sensor_simulator_init(void)
-{
-    m_battery_sim_cfg.min          = MIN_BATTERY_LEVEL;
-    m_battery_sim_cfg.max          = MAX_BATTERY_LEVEL;
-    m_battery_sim_cfg.incr         = BATTERY_LEVEL_INCREMENT;
-    m_battery_sim_cfg.start_at_max = true;
-
-    sensorsim_init(&m_battery_sim_state, &m_battery_sim_cfg);
-}
-
 
 /**@brief   Function for starting application timers.
  * @details Timers are run after the scheduler has started.
@@ -1048,6 +1085,7 @@ int main(void)
     ble_stack_init();
 
     // Initialize modules.
+    adc_configure();
     gpio_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
