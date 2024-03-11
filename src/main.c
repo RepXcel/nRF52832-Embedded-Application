@@ -64,7 +64,6 @@
 #include "ble_dis.h"
 #include "ble_conn_params.h"
 #include "lis2dh12.h"
-#include "sensorsim.h"
 #include "nrf_gpio.h"
 #include "nrf_twi_mngr.h"
 #include "nrf_sdh.h"
@@ -102,7 +101,7 @@
 #define APP_ADV_INTERVAL                    300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 #define APP_ADV_DURATION                    18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
-#define BATTERY_LEVEL_MEAS_INTERVAL         2000                                    /**< Battery level measurement interval (ms). */
+#define BATTERY_LEVEL_MEAS_INTERVAL         10000                                   /**< Battery level measurement interval (ms). */
 #define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
@@ -129,7 +128,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define NOTIFICATION_INTERVAL               20                                      /**< Notificatio update interval */
+#define WORKOUT_DATA_NOTIFICATION_INTERVAL  20                                      /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
@@ -185,13 +184,10 @@ static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
 static device_state_t   m_device_state = REST;
-static float            m_velocity = 0;                                          /**< Velocity value*/
+static float            m_velocity = 0;                                             /**< Velocity value*/
 static workout_data_t   m_rep_velocity = {0};
 
-static nrf_saadc_value_t adc_buf[2];
-static sensorsim_cfg_t   m_battery_sim_cfg;                                         /**< Battery Level sensor simulator configuration. */
-static sensorsim_state_t m_battery_sim_state;                                       /**< Battery Level sensor simulator state. */
-static uint8_t          counter = 0;
+static nrf_saadc_value_t adc_buf[2];                                                /**< SAADC buffer */
 
 static ble_uuid_t m_adv_uuids[] = {                                                 /**< Universally unique service identifiers. */
     {BLE_UUID_BATTERY_SERVICE, BLE_UUID_TYPE_BLE},
@@ -203,7 +199,7 @@ static ble_uuid_t m_sr_uuids[] = {
 };
 
 static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_notif_timer;                                             /**< Definition of notification timer. */
+static TimerHandle_t m_ble_workout_data_notif_timer;                                             /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
@@ -392,6 +388,7 @@ void saadc_event_handler(nrf_drv_saadc_evt_t const * p_event)
         {
             APP_ERROR_HANDLER(err_code);
         }
+        // NRF_LOG_INFO("Battery percent: %d", percentage_batt_lvl);
     }
 }
 
@@ -431,11 +428,11 @@ static void battery_level_meas_timeout_handler(void * p_context)
     APP_ERROR_CHECK(err_code);
 }
 
-static void notification_timeout_handler(void * p_context)
+static void workout_data_notification_timeout_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
     ret_code_t err_code;
-    err_code = ble_workout_data_custom_value_update(&m_workout_data, m_rep_velocity);
+    err_code = ble_workout_data_value_update(&m_workout_data, m_rep_velocity);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -450,7 +447,7 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 
     // Create timers.
-    m_ble_notif_timer = xTimerCreate("WKT", NOTIFICATION_INTERVAL, pdTRUE, NULL, notification_timeout_handler);
+    m_ble_workout_data_notif_timer = xTimerCreate("WKT", WORKOUT_DATA_NOTIFICATION_INTERVAL, pdTRUE, NULL, workout_data_notification_timeout_handler);
     m_battery_timer = xTimerCreate("BATT",
                                    BATTERY_LEVEL_MEAS_INTERVAL,
                                    pdTRUE,
@@ -520,7 +517,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
     {
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED:
             NRF_LOG_INFO("WORKOUT EVENT: NOTIF ENABLED");
-            xReturn = xTimerStart(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            xReturn = xTimerStart(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
@@ -529,7 +526,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
             NRF_LOG_INFO("WORKOUT EVENT: NOTIF DISABLED");
-            xReturn = xTimerStop(m_ble_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
+            xReturn = xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
             if (xReturn != pdPASS) {
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
@@ -604,19 +601,6 @@ static void services_init(void)
     err_code = ble_workout_data_init(&m_workout_data, &workout_data_init);
     APP_ERROR_CHECK(err_code);	
 }
-
-
-/**@brief Function for initializing the sensor simulators. */
-static void sensor_simulator_init(void)
-{
-    m_battery_sim_cfg.min          = MIN_BATTERY_LEVEL;
-    m_battery_sim_cfg.max          = MAX_BATTERY_LEVEL;
-    m_battery_sim_cfg.incr         = BATTERY_LEVEL_INCREMENT;
-    m_battery_sim_cfg.start_at_max = true;
-
-    sensorsim_init(&m_battery_sim_state, &m_battery_sim_cfg);
-}
-
 
 /**@brief   Function for starting application timers.
  * @details Timers are run after the scheduler has started.
