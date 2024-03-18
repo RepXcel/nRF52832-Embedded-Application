@@ -139,7 +139,7 @@ ret_code_t ble_workout_data_init(ble_workout_data_t * p_workout_data, const ble_
     return NRF_SUCCESS;
 }
 
-ret_code_t ble_workout_data_custom_value_update(ble_workout_data_t * p_workout_data, workout_data_t custom_value)
+ret_code_t ble_workout_data_value_update(ble_workout_data_t * p_workout_data, workout_data_t custom_value)
 {
     if (p_workout_data == NULL)
     {
