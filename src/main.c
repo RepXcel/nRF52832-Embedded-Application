@@ -242,7 +242,7 @@ static void update_velocity(void){
         }
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
         // NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
-        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
     }
 }
 
@@ -310,6 +310,7 @@ static void led_cycle_thread(void  * arg) {
     UNUSED_PARAMETER(arg);
     for(;;) {
         for (int i = 0; i < 8; i++) {
+                NRF_LOG_INFO("LED state: %d", i);
                 nrf_gpio_pin_write(ledRed, i & 0x1);
                 nrf_gpio_pin_write(ledGreen, (i >> 1) & 0x1);
                 nrf_gpio_pin_write(ledBlue, (i >> 2) & 0x1);
@@ -1085,8 +1086,7 @@ int main(void)
 
     UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
     UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread));
-    // UNUSED_VARIABLE(xTaskCreate(led_cycle_thread, "led", 256, NULL, 2, &m_led_cycle_thread));
-
+    UNUSED_VARIABLE(xTaskCreate(led_cycle_thread, "led", 256, NULL, 2, &m_led_cycle_thread));
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
