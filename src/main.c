@@ -106,8 +106,8 @@
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
 
-#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(10, UNIT_1_25_MS)         /**< Minimum acceptable connection interval (0.4 seconds). */
-#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)         /**< Maximum acceptable connection interval (0.65 second). */
+#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(100, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.10 seconds). */
+#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(300, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.30 second). */
 #define SLAVE_LATENCY                       0                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                    MSEC_TO_UNITS(4000, UNIT_10_MS)         /**< Connection supervisory time-out (4 seconds). */
 
@@ -128,7 +128,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define WORKOUT_DATA_NOTIFICATION_INTERVAL  20                                      /**< Notification update interval */
+#define WORKOUT_DATA_NOTIFICATION_INTERVAL  300                                      /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
@@ -137,7 +137,7 @@
 #define ACCEL_PERIOD                        0.05f                                   /**< Accel sampling period */
 #define ACCEL_SAMPLE_TOLERANCE              2                                       /**< Number of samples to use for velocity when valid sample is detected*/
 #define REP_VELOCITY_MINIMUM                4.0f                                    /**< Minimum velocity for rep tracking*/         
-#define REP_VELOICTY_MOVING_THRESHOLD       60                                      /**< Number of samples for a valid rep */
+#define REP_VELOICTY_MOVING_THRESHOLD       90                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_CMPS(MG)                      MG * 0.0981f                            /**< Converts from mg to cm/s^2 (centimeters per second)*/
 
@@ -250,8 +250,8 @@ static void update_velocity(void){
             samples_to_read = MAX(samples_to_read - 1, 0);
         }
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-        // NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
-        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
+        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
     }
 }
 
@@ -290,7 +290,7 @@ static void rep_velocity_thread(void  * arg){
             break;
 
             case BEGIN_MOVING:
-            if(m_velocity == 0){
+            if(m_velocity < REP_VELOCITY_MINIMUM){
                 m_device_state = REST;
             } else if(sample_count == REP_VELOICTY_MOVING_THRESHOLD){
                 m_device_state = MOVING;
@@ -522,6 +522,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
             accel_on();
+            m_rep_velocity.data.timestamp = 0;
             break;
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
@@ -1077,6 +1078,11 @@ int main(void)
         APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
     }
 #endif
+    
+    if (pdPASS != xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread) || 
+        pdPASS != xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread)){
+        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+    }
 
     // Activate deep sleep mode.
     SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
@@ -1097,11 +1103,6 @@ int main(void)
     peer_manager_init();
     accel_init();
     application_timers_start();
-
-    erase_bonds = true;
-
-    UNUSED_VARIABLE(xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread));
-    UNUSED_VARIABLE(xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread));
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
