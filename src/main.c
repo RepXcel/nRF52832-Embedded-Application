@@ -92,8 +92,8 @@
 
 #include "ble_workout_data.h"
 
-#define DEVICE_NAME                         "TEST DEVICE 1"                               /**< Name of device. Will be included in the advertising data. */
-#define MANUFACTURER_NAME                   "NordicSemiconductor"                   /**< Manufacturer. Will be passed to Device Information Service. */
+#define DEVICE_NAME                         "RepXcel"                               /**< Name of device. Will be included in the advertising data. */
+#define MANUFACTURER_NAME                   "Garmin"                                /**< Manufacturer. Will be passed to Device Information Service. */
 
 #define APP_BLE_OBSERVER_PRIO               3                                       /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 #define APP_BLE_CONN_CFG_TAG                1                                       /**< A tag identifying the SoftDevice BLE configuration. */
@@ -135,9 +135,9 @@
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_PERIOD                        1.0f/200.0f                             /**< Accel sampling period */
 #define ACCEL_ERROR_THRESHOLD               150.0f                                  /**< Values below threshold will be treated as negligible acceleration*/
-#define ACCEL_SAMPLE_TOLERANCE              3                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define ACCEL_SAMPLE_TOLERANCE              5                                       /**< Number of samples to use for velocity when valid sample is detected*/
 #define REP_VELOCITY_MINIMUM                40.0f                                   /**< Minimum velocity for rep tracking*/         
-#define REP_VELOICTY_MOVING_THRESHOLD       20                                      /**< Number of samples for a valid rep */
+#define REP_VELOICTY_MOVING_THRESHOLD       24                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_MMPSS(MG)                     (MG) * 9.81f                            /**< Converts from mg to mm/s^2 (centimeters per second)*/
 
@@ -244,7 +244,7 @@ static void update_velocity(void){
             if(m_samples_to_read[i]){
                 velocity_xyz[i] += accel_magnitude_mmpss[i] * ACCEL_PERIOD;
             } else {
-                velocity_xyz[i] *= 0.3f;
+                velocity_xyz[i] = 0;
             }
             m_samples_to_read[i] = MAX(m_samples_to_read[i] - 1, 0);
 
