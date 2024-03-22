@@ -134,12 +134,12 @@
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
 #define ACCEL_PERIOD                        1.0f/200.0f                             /**< Accel sampling period */
+#define ACCEL_ERROR_THRESHOLD               150.0f                                  /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_SAMPLE_TOLERANCE              3                                       /**< Number of samples to use for velocity when valid sample is detected*/
-#define ACCEL_ERROR_THRESHOLD               150.0f                                   /**< Values below threshold will be treated as negligible acceleration*/
 #define REP_VELOCITY_MINIMUM                3.0f                                    /**< Minimum velocity for rep tracking*/         
-#define REP_VELOICTY_MOVING_THRESHOLD       40                                      /**< Number of samples for a valid rep */
+#define REP_VELOICTY_MOVING_THRESHOLD       60                                      /**< Number of samples for a valid rep */
 
-#define MG_TO_MMPSS(MG)                     (MG) * 9.81f                           /**< Converts from mg to mm/s^2 (centimeters per second)*/
+#define MG_TO_MMPSS(MG)                     (MG) * 9.81f                            /**< Converts from mg to mm/s^2 (centimeters per second)*/
 
 #define LIS2DH12_INT1                       25                                      /**< nRF52 Pin for LIS2DH12 INT1 */
 #define LIS2DH12_INT2                       26                                      /**< nRF52 Pin for LIS2DH12 INT2 */
@@ -251,8 +251,8 @@ static void update_velocity(void){
         }
         m_velocity = sqrt(velocity_xyz[0] * velocity_xyz[0] + velocity_xyz[1] * velocity_xyz[1] + velocity_xyz[2] * velocity_xyz[2]);
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-        // NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
-        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
+        NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
         // NRF_LOG_INFO("Rep accel X: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[0]));
         // NRF_LOG_INFO("Rep accel Y: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[1]));
         // NRF_LOG_INFO("Rep accel Z: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[2]));
@@ -529,7 +529,7 @@ static void on_workout_data_evt(ble_workout_data_t * p_workout_data_service, ble
                     APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
             }
             accel_on();
-            m_rep_velocity.data.timestamp = 0;
+            memset(&m_rep_velocity, 0, sizeof(workout_data_t));
             break;
 
         case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
