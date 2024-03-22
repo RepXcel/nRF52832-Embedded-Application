@@ -92,7 +92,7 @@
 
 #include "ble_workout_data.h"
 
-#define DEVICE_NAME                         "RepXcel"                               /**< Name of device. Will be included in the advertising data. */
+#define DEVICE_NAME                         "TEST DEVICE 1"                               /**< Name of device. Will be included in the advertising data. */
 #define MANUFACTURER_NAME                   "NordicSemiconductor"                   /**< Manufacturer. Will be passed to Device Information Service. */
 
 #define APP_BLE_OBSERVER_PRIO               3                                       /**< Application's BLE observer priority. You shouldn't need to modify this value. */
@@ -136,8 +136,8 @@
 #define ACCEL_PERIOD                        1.0f/200.0f                             /**< Accel sampling period */
 #define ACCEL_ERROR_THRESHOLD               150.0f                                  /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_SAMPLE_TOLERANCE              3                                       /**< Number of samples to use for velocity when valid sample is detected*/
-#define REP_VELOCITY_MINIMUM                3.0f                                    /**< Minimum velocity for rep tracking*/         
-#define REP_VELOICTY_MOVING_THRESHOLD       60                                      /**< Number of samples for a valid rep */
+#define REP_VELOCITY_MINIMUM                40.0f                                   /**< Minimum velocity for rep tracking*/         
+#define REP_VELOICTY_MOVING_THRESHOLD       20                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_MMPSS(MG)                     (MG) * 9.81f                            /**< Converts from mg to mm/s^2 (centimeters per second)*/
 
@@ -266,8 +266,7 @@ static void accel_thread(void * arg)
 {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
-    for(;;)
-    {
+    for(;;) {
         __WFI();
         if(m_data_ready) {
             err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
@@ -455,12 +454,7 @@ static void timers_init(void)
 
     // Create timers.
     m_ble_workout_data_notif_timer = xTimerCreate("WKT", WORKOUT_DATA_NOTIFICATION_INTERVAL, pdTRUE, NULL, workout_data_notification_timeout_handler);
-    m_battery_timer = xTimerCreate("BATT",
-                                   BATTERY_LEVEL_MEAS_INTERVAL,
-                                   pdTRUE,
-                                   NULL,
-                                   battery_level_meas_timeout_handler);
-
+    m_battery_timer = xTimerCreate("BATT", BATTERY_LEVEL_MEAS_INTERVAL, pdTRUE, NULL, battery_level_meas_timeout_handler);
 }
 
 
@@ -1078,15 +1072,12 @@ int main(void)
     // Do not start any interrupt that uses system functions before system initialisation.
     // The best solution is to start the OS before any other initalisation.
 
+    if (
 #if NRF_LOG_ENABLED
     // Start execution.
-    if (pdPASS != xTaskCreate(logger_thread, "LOGGER", 256, NULL, 1, &m_logger_thread))
-    {
-        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    }
+        pdPASS != xTaskCreate(logger_thread, "LOGGER", 256, NULL, 1, &m_logger_thread) ||
 #endif
-    
-    if (pdPASS != xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread) || 
+        pdPASS != xTaskCreate(accel_thread, "accel", 256, NULL, 1, &m_accel_thread) ||
         pdPASS != xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread)){
         APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
     }
