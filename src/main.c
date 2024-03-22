@@ -133,13 +133,13 @@
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
 #define ACCEl_BUFFER_SIZE                   17                                      /**< Buffer size */
-#define ACCEL_ERROR_THRESHOLD               2.0f                                    /**< Values below threshold will be treated as negligible acceleration*/
-#define ACCEL_PERIOD                        0.05f                                   /**< Accel sampling period */
-#define ACCEL_SAMPLE_TOLERANCE              2                                       /**< Number of samples to use for velocity when valid sample is detected*/
-#define REP_VELOCITY_MINIMUM                4.0f                                    /**< Minimum velocity for rep tracking*/         
-#define REP_VELOICTY_MOVING_THRESHOLD       90                                      /**< Number of samples for a valid rep */
+#define ACCEL_PERIOD                        1.0f/200.0f                             /**< Accel sampling period */
+#define ACCEL_SAMPLE_TOLERANCE              3                                       /**< Number of samples to use for velocity when valid sample is detected*/
+#define ACCEL_ERROR_THRESHOLD               150.0f                                   /**< Values below threshold will be treated as negligible acceleration*/
+#define REP_VELOCITY_MINIMUM                3.0f                                    /**< Minimum velocity for rep tracking*/         
+#define REP_VELOICTY_MOVING_THRESHOLD       40                                      /**< Number of samples for a valid rep */
 
-#define MG_TO_CMPS(MG)                      MG * 0.0981f                            /**< Converts from mg to cm/s^2 (centimeters per second)*/
+#define MG_TO_MMPSS(MG)                     (MG) * 9.81f                           /**< Converts from mg to mm/s^2 (centimeters per second)*/
 
 #define LIS2DH12_INT1                       25                                      /**< nRF52 Pin for LIS2DH12 INT1 */
 #define LIS2DH12_INT2                       26                                      /**< nRF52 Pin for LIS2DH12 INT2 */
@@ -182,10 +182,11 @@ BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
+static uint8_t          m_samples_to_read[3] = {0};                                 /**< Number of samples to read on each axis (x,y,z)*/
 static bool             m_data_ready = false;                                       /**< Data ready flag*/  
-static device_state_t   m_device_state = REST;
-static float            m_velocity = 0;                                             /**< Velocity value*/
-static workout_data_t   m_rep_velocity = {0};
+static device_state_t   m_device_state = REST;                                      /**< Device state for rep velocity tracking*/  
+static float            m_velocity;                                                 /**< Current device velocity (magnitude)*/
+static workout_data_t   m_rep_velocity = {0};                                       /**< Device state for rep velocity tracking*/  
 
 static nrf_saadc_value_t adc_buf[2];                                                /**< SAADC buffer */
 
@@ -229,29 +230,35 @@ static void accel_off(void){
 }
 
 static void update_velocity(void){
-    uint8_t samples_to_read;
-    int16_t accel_x_mg, accel_y_mg, accel_z_mg;
-    float accel_magnitude_mg, accel_magnitude_cmpss;
+    float accel_magnitude_mmpss[3];
+    float velocity_xyz[3];
 
-    samples_to_read = 0;
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
-        accel_x_mg = m_accel_data[i].x >> 4;
-        accel_y_mg = m_accel_data[i].y >> 4;
-        accel_z_mg = m_accel_data[i].z >> 4;
-        accel_magnitude_mg = sqrt(accel_x_mg * accel_x_mg + accel_y_mg * accel_y_mg + accel_z_mg * accel_z_mg);
-        accel_magnitude_cmpss = MG_TO_CMPS(accel_magnitude_mg);
-        if (accel_magnitude_cmpss > ACCEL_ERROR_THRESHOLD) {
-            samples_to_read = ACCEL_SAMPLE_TOLERANCE;
+        accel_magnitude_mmpss[0] = MG_TO_MMPSS(m_accel_data[i].x >> 4);
+        accel_magnitude_mmpss[1] = MG_TO_MMPSS(m_accel_data[i].y >> 4);
+        accel_magnitude_mmpss[2] = MG_TO_MMPSS(m_accel_data[i].z >> 4);
+        for(uint8_t i = 0; i < sizeof(accel_magnitude_mmpss) / sizeof(float); i++){
+            if (abs(accel_magnitude_mmpss[i]) > ACCEL_ERROR_THRESHOLD) {
+                m_samples_to_read[i] = ACCEL_SAMPLE_TOLERANCE;
+            }
+            if(m_samples_to_read[i]){
+                velocity_xyz[i] += accel_magnitude_mmpss[i] * ACCEL_PERIOD;
+            } else {
+                velocity_xyz[i] *= 0.3f;
+            }
+            m_samples_to_read[i] = MAX(m_samples_to_read[i] - 1, 0);
+
         }
-        if(samples_to_read){
-            m_velocity += accel_magnitude_cmpss * ACCEL_PERIOD;
-        } else {
-            m_velocity = 0;
-            samples_to_read = MAX(samples_to_read - 1, 0);
-        }
+        m_velocity = sqrt(velocity_xyz[0] * velocity_xyz[0] + velocity_xyz[1] * velocity_xyz[1] + velocity_xyz[2] * velocity_xyz[2]);
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
-        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
+        // NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity));
+        // NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state, NRF_LOG_FLOAT(m_rep_velocity.data.velocity));
+        // NRF_LOG_INFO("Rep accel X: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[0]));
+        // NRF_LOG_INFO("Rep accel Y: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[1]));
+        // NRF_LOG_INFO("Rep accel Z: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[2]));
+        // NRF_LOG_INFO("Rep Velocity X: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[0]));
+        // NRF_LOG_INFO("Rep Velocity Y: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[1]));
+        // NRF_LOG_INFO("Rep Velocity Z: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[2]));
     }
 }
 
@@ -281,7 +288,7 @@ static void rep_velocity_thread(void  * arg){
     {
         switch(m_device_state){
             case REST:
-            if(m_velocity > REP_VELOCITY_MINIMUM){
+            if(m_velocity >= REP_VELOCITY_MINIMUM){
                 temp_rep_velocity = 0;
                 sample_count = 0;
                 temp_rep_velocity = m_velocity;
@@ -300,7 +307,7 @@ static void rep_velocity_thread(void  * arg){
             break;
 
             case MOVING:
-            if(m_velocity == 0){
+            if(m_velocity < REP_VELOCITY_MINIMUM){
                 m_rep_velocity.data.velocity = temp_rep_velocity;
                 m_rep_velocity.data.timestamp += 1;
                 m_device_state = REST;
