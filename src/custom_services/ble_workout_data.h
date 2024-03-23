@@ -1,8 +1,9 @@
-#include <stdint.h>
-#include <stdbool.h>
 #include "ble.h"
 #include "ble_srv_common.h"
+#include <stdbool.h>
+#include <stdint.h>
 
+/* clang-format off */
 #define BLE_WORKOUT_DATA_DEF(_name)                                                                 \
 static ble_workout_data_t _name;                                                                    \
 NRF_SDH_BLE_OBSERVER(_name ## _obs,                                                                 \
