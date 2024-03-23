@@ -136,7 +136,7 @@
 #define ACCEL_PERIOD                        1.0f/200.0f                             /**< Accel sampling period */
 #define ACCEL_ERROR_THRESHOLD               150.0f                                  /**< Values below threshold will be treated as negligible acceleration*/
 #define ACCEL_SAMPLE_TOLERANCE              5                                       /**< Number of samples to use for velocity when valid sample is detected*/
-#define REP_VELOCITY_MINIMUM                40.0f                                   /**< Minimum velocity for rep tracking*/         
+#define REP_VELOCITY_MINIMUM                35.0f                                   /**< Minimum velocity for rep tracking*/         
 #define REP_VELOICTY_MOVING_THRESHOLD       24                                      /**< Number of samples for a valid rep */
 
 #define MG_TO_MMPSS(MG)                     (MG) * 9.81f                            /**< Converts from mg to mm/s^2 (centimeters per second)*/
@@ -200,7 +200,7 @@ static ble_uuid_t m_sr_uuids[] = {
 };
 
 static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
-static TimerHandle_t m_ble_workout_data_notif_timer;                                             /**< Definition of notification timer. */
+static TimerHandle_t m_ble_workout_data_notif_timer;                                /**< Definition of notification timer. */
 
 #if NRF_LOG_ENABLED
 static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
@@ -230,8 +230,8 @@ static void accel_off(void){
 }
 
 static void update_velocity(void){
+    static float velocity_xyz[3] = {0};
     float accel_magnitude_mmpss[3];
-    float velocity_xyz[3];
 
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++){
         accel_magnitude_mmpss[0] = MG_TO_MMPSS(m_accel_data[i].x >> 4);
@@ -247,7 +247,6 @@ static void update_velocity(void){
                 velocity_xyz[i] = 0;
             }
             m_samples_to_read[i] = MAX(m_samples_to_read[i] - 1, 0);
-
         }
         m_velocity = sqrt(velocity_xyz[0] * velocity_xyz[0] + velocity_xyz[1] * velocity_xyz[1] + velocity_xyz[2] * velocity_xyz[2]);
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
@@ -306,7 +305,7 @@ static void rep_velocity_thread(void  * arg){
             break;
 
             case MOVING:
-            if(m_velocity < REP_VELOCITY_MINIMUM){
+            if(m_velocity == 0){
                 m_rep_velocity.data.velocity = temp_rep_velocity;
                 m_rep_velocity.data.timestamp += 1;
                 m_device_state = REST;
