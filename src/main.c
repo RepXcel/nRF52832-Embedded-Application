@@ -48,6 +48,7 @@
  * This application uses the @ref srvlib_conn_params module.
  */
 
+/* clang-format off */
 #include <stdint.h>
 #include <string.h>
 
@@ -76,11 +77,13 @@
 #include "nrf_ble_qwr.h"
 #include "nrf_drv_clock.h"
 #include "nrf_drv_gpiote.h"
+#include "nrf_drv_ppi.h"
 #include "nrf_drv_saadc.h"
 #include "nrf_gpio.h"
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+#include "nrf_pwr_mgmt.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_ble.h"
 #include "nrf_sdh_freertos.h"
@@ -129,7 +132,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define WORKOUT_DATA_NOTIFICATION_INTERVAL  300                                      /**< Notification update interval */
+#define WORKOUT_DATA_NOTIFICATION_INTERVAL  300                                     /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
@@ -148,6 +151,12 @@
 #define LIS2DH12_SA0                        28                                      /**< nRF52 Pin for LIS2DH12 SA0 */
 #define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
 #define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
+
+#define BUTTON_RESET                        1                                       /**< ID of the button used to reset the application. */
+#define BATTERY_CHARGE_INDICATION           22                                      /**< ID of charge indication LED */
+#define LED_GREEN                           11
+#define LED_BLUE                            12
+#define LED_RED                             13
 
 /**@brief Macro to convert the result of ADC conversion in millivolts.
  *
@@ -199,6 +208,8 @@ static ble_uuid_t m_sr_uuids[] = {
     {CUSTOM_SERVICE_UUID, BLE_UUID_TYPE_VENDOR_BEGIN}                               /**< Universally unique service identifiers. */
 };
 
+static nrf_ppi_channel_t m_ppi_channel;
+
 static TimerHandle_t m_battery_timer;                                               /**< Definition of battery timer. */
 static TimerHandle_t m_ble_workout_data_notif_timer;                                /**< Definition of notification timer. */
 
@@ -206,7 +217,7 @@ static TimerHandle_t m_ble_workout_data_notif_timer;                            
 static TaskHandle_t m_logger_thread;                                                /**< Definition of Logger thread. */
 #endif
 static TaskHandle_t m_accel_thread;                                                 /**< Definition of Accel thread. */
-static TaskHandle_t m_rep_velocity_thread;
+static TaskHandle_t m_rep_velocity_thread;                                          /**< Definition of Per Rep Velocity thread. */
 /* clang-format on */
 
 static void advertising_start(void* p_erase_bonds);
@@ -287,7 +298,6 @@ static void accel_thread(void* arg) {
             err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
             APP_ERROR_CHECK(err_code);
             update_velocity();
-            bsp_board_led_off(BSP_BOARD_LED_1);
             m_data_ready = false;
         }
     }
@@ -794,23 +804,21 @@ static void bsp_event_handler(bsp_event_t event) {
 
     switch (event) {
     case BSP_EVENT_SLEEP:
+        NRF_LOG_INFO("BSP SLEEP");
         sleep_mode_enter();
         break;
 
     case BSP_EVENT_DISCONNECT:
+        NRF_LOG_INFO("BSP DISCONNECT");
         err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
         if (err_code != NRF_ERROR_INVALID_STATE) {
             APP_ERROR_CHECK(err_code);
         }
         break;
 
-    case BSP_EVENT_WHITELIST_OFF:
-        if (m_conn_handle == BLE_CONN_HANDLE_INVALID) {
-            err_code = ble_advertising_restart_without_whitelist(&m_advertising);
-            if (err_code != NRF_ERROR_INVALID_STATE) {
-                APP_ERROR_CHECK(err_code);
-            }
-        }
+    case BSP_EVENT_RESET:
+        NRF_LOG_INFO("BSP RESET");
+        nrf_pwr_mgmt_shutdown(NRF_PWR_MGMT_SHUTDOWN_RESET);
         break;
 
     default:
@@ -911,6 +919,9 @@ static void buttons_leds_init(bool* p_erase_bonds) {
     err_code = bsp_btn_ble_init(NULL, &startup_event);
     APP_ERROR_CHECK(err_code);
 
+    err_code = bsp_event_to_button_action_assign(BUTTON_RESET, BSP_BUTTON_ACTION_PUSH, BSP_EVENT_RESET);
+    APP_ERROR_CHECK(err_code);
+
     *p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
 }
 
@@ -987,10 +998,9 @@ static void accel_init(void) {
     accel_off();
 }
 
-static void int1_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
-    m_data_ready = true;
-    bsp_board_led_on(BSP_BOARD_LED_1);
-}
+static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) { m_data_ready = true; }
+
+static void empty_gpiote_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {}
 
 static void gpio_init(void) {
     ret_code_t err_code;
@@ -1001,10 +1011,35 @@ static void gpio_init(void) {
     nrf_gpio_cfg_output(LIS2DH12_CS);
     nrf_gpio_pin_set(LIS2DH12_CS);
 
-    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
-    err_code = nrf_drv_gpiote_in_init(LIS2DH12_INT1, &in_config, int1_pin_handler);
+    nrf_drv_gpiote_in_config_t accel_interrupt_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
+    err_code = nrf_drv_gpiote_in_init(LIS2DH12_INT1, &accel_interrupt_config, accel_interrupt_handler);
     APP_ERROR_CHECK(err_code);
     nrf_drv_gpiote_in_event_enable(LIS2DH12_INT1, true);
+
+    nrf_drv_gpiote_in_config_t battery_interrupt_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
+    err_code = nrf_drv_gpiote_in_init(BATTERY_CHARGE_INDICATION, &battery_interrupt_config, empty_gpiote_handler);
+    nrf_drv_gpiote_in_event_enable(BATTERY_CHARGE_INDICATION, true);
+
+    nrf_drv_gpiote_out_config_t battery_charge_indicator_config = GPIOTE_CONFIG_OUT_TASK_TOGGLE(false);
+    err_code = nrf_drv_gpiote_out_init(LED_GREEN, &battery_charge_indicator_config);
+    nrf_drv_gpiote_out_task_enable(LED_GREEN);
+}
+
+static void ppi_init(void) {
+    ret_code_t err_code;
+
+    err_code = nrf_drv_ppi_init();
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_drv_ppi_channel_alloc(&m_ppi_channel);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_drv_ppi_channel_assign(m_ppi_channel, nrf_drv_gpiote_in_event_addr_get(BATTERY_CHARGE_INDICATION),
+                                          nrf_drv_gpiote_out_task_addr_get(LED_GREEN));
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_drv_ppi_channel_enable(m_ppi_channel);
+    APP_ERROR_CHECK(err_code);
 }
 
 /**@brief Function for application main entry.
@@ -1039,6 +1074,7 @@ int main(void) {
     // Initialize modules.
     adc_configure();
     gpio_init();
+    ppi_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
     gap_params_init();
