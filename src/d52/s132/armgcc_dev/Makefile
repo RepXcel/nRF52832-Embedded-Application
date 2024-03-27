@@ -111,7 +111,6 @@ SRC_FILES += \
 INC_FOLDERS += \
   $(PROJ_DIR)/config \
   $(PROJ_DIR)/custom_services \
-  $(PROJ_DIR)/custom_boards \
   $(SDK_ROOT)/components/drivers_ext/lis2dh12 \
   $(SDK_ROOT)/components/nfc/ndef/generic/message \
   $(SDK_ROOT)/components/nfc/t2t_lib \
@@ -258,7 +257,6 @@ OPT = -O3 -g3
 
 # C flags common to all targets
 CFLAGS += $(OPT)
-# CFLAGS += -DBOARD_CUSTOM
 CFLAGS += -DBOARD_D52DK1
 CFLAGS += -DDEBUG
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
@@ -285,7 +283,6 @@ ASMFLAGS += -g3
 ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
-# ASMFLAGS += -DBOARD_CUSTOM
 ASMFLAGS += -DBOARD_D52DK1
 ASMFLAGS += -DDEBUG
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET

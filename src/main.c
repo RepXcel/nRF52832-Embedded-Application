@@ -105,7 +105,7 @@
 #define APP_ADV_INTERVAL                    300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 #define APP_ADV_DURATION                    18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 
-#define BATTERY_LEVEL_MEAS_INTERVAL         10000                                   /**< Battery level measurement interval (ms). */
+#define BATTERY_LEVEL_MEAS_INTERVAL         5000                                    /**< Battery level measurement interval (ms). */
 #define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
 #define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
 #define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
@@ -147,16 +147,20 @@
 
 #define LIS2DH12_INT1                       25                                      /**< nRF52 Pin for LIS2DH12 INT1 */
 #define LIS2DH12_INT2                       26                                      /**< nRF52 Pin for LIS2DH12 INT2 */
-#define LIS2DH12_CS                         27                                      /**< nRF52 Pin for LIS2DH12 CS */
-#define LIS2DH12_SA0                        28                                      /**< nRF52 Pin for LIS2DH12 SA0 */
 #define LIS2DH12_SDA                        29                                      /**< nRF52 Pin for LIS2DH12 SDA */
 #define LIS2DH12_SCL                        30                                      /**< nRF52 Pin for LIS2DH12 SCL */
 
+#define BUTTON_SLEEPWAKE                    0                                       /**< ID of the button used to sleep/wake the application. */
 #define BUTTON_RESET                        1                                       /**< ID of the button used to reset the application. */
-#define BATTERY_CHARGE_INDICATION           22                                      /**< ID of charge indication LED */
-#define LED_GREEN                           11
-#define LED_BLUE                            12
-#define LED_RED                             13
+
+#ifdef BOARD_D52DK1
+    #define BATTERY_CHARGE_INDICATION       12                                      /**< ID of charge indication LED */
+    #define LED_GREEN                       20
+
+#else
+    #define BATTERY_CHARGE_INDICATION       4                                       /**< ID of charge indication LED */
+    #define LED_GREEN                       11
+#endif
 
 /**@brief Macro to convert the result of ADC conversion in millivolts.
  *
@@ -191,8 +195,8 @@ BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static uint8_t          m_samples_to_read[3] = {0};                                 /**< Number of samples to read on each axis (x,y,z)*/
-static bool             m_data_ready = false;                                       /**< Data ready flag*/  
+static uint8_t          m_samples_to_read[3] = {0};      
+static bool             m_data_ready = false;                               /**< Number of samples to read on each axis (x,y,z)*/
 static device_state_t   m_device_state = REST;                                      /**< Device state for rep velocity tracking*/  
 static float            m_velocity_mmps;                                            /**< Current device velocity (magnitude)*/
 static workout_data_t   m_rep_velocity_mmps = {0};                                  /**< Device state for rep velocity tracking*/  
@@ -412,7 +416,7 @@ void saadc_event_handler(nrf_drv_saadc_evt_t const* p_event) {
             (err_code != NRF_ERROR_BUSY) && (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)) {
             APP_ERROR_HANDLER(err_code);
         }
-        // NRF_LOG_INFO("Battery percent: %d", percentage_batt_lvl);
+        NRF_LOG_INFO("Battery percent: %d", percentage_batt_lvl);
     }
 }
 
@@ -519,25 +523,31 @@ static void gatt_init(void) {
  */
 static void nrf_qwr_error_handler(uint32_t nrf_error) { APP_ERROR_HANDLER(nrf_error); }
 
-static void on_workout_data_evt(ble_workout_data_t* p_workout_data_service, ble_workout_data_evt_t* p_evt) {
-    BaseType_t xReturn;
+static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_data_evt_t* p_evt) {
+    ret_code_t err_code;
+
     switch (p_evt->evt_type) {
     case BLE_WORKOUT_DATA_EVT_NOTIFICATION_ENABLED:
         NRF_LOG_INFO("WORKOUT EVENT: NOTIF ENABLED");
-        xReturn = xTimerStart(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
-        if (xReturn != pdPASS) {
+        if (pdPASS != xTimerStart(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE)) {
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
+
+        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_1);
+        APP_ERROR_CHECK(err_code);
         accel_on();
         memset(&m_rep_velocity_mmps, 0, sizeof(workout_data_t));
         break;
 
     case BLE_WORKOUT_DATA_EVT_NOTIFICATION_DISABLED:
         NRF_LOG_INFO("WORKOUT EVENT: NOTIF DISABLED");
-        xReturn = xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
-        if (xReturn != pdPASS) {
+        if (pdPASS != xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE)) {
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
+
+        // err_code = bsp_indication_set(BSP_INDICATE_IDLE);
+        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_0);
+        APP_ERROR_CHECK(err_code);
         accel_off();
         break;
 
@@ -547,11 +557,32 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data_service, ble_
 
     case BLE_WORKOUT_DATA_EVT_DISCONNECTED:
         NRF_LOG_INFO("WORKOUT EVENT: DISCONNECTED");
-        xReturn = xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE);
-        if (xReturn != pdPASS) {
+        if (pdPASS != xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE)) {
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
         accel_off();
+        break;
+
+    default:
+        // No implementation needed.
+        break;
+    }
+}
+
+void on_bas_evt(ble_bas_t* p_bas, ble_bas_evt_t* p_evt) {
+    switch (p_evt->evt_type) {
+    case BLE_BAS_EVT_NOTIFICATION_ENABLED:
+        NRF_LOG_INFO("BAS EVENT: NOTIF ENABLED");
+        if (pdPASS != xTimerStart(m_battery_timer, OSTIMER_WAIT_FOR_QUEUE)) {
+            APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+        }
+        break;
+
+    case BLE_BAS_EVT_NOTIFICATION_DISABLED:
+        NRF_LOG_INFO("BAS EVENT: NOTIF DISABLED");
+        if (pdPASS != xTimerStop(m_battery_timer, OSTIMER_WAIT_FOR_QUEUE)) {
+            APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
+        }
         break;
 
     default:
@@ -585,7 +616,7 @@ static void services_init(void) {
     bas_init.bl_cccd_wr_sec = SEC_OPEN;
     bas_init.bl_report_rd_sec = SEC_OPEN;
 
-    bas_init.evt_handler = NULL;
+    bas_init.evt_handler = on_bas_evt;
     bas_init.support_notification = true;
     bas_init.p_report_ref = NULL;
     bas_init.initial_batt_level = 100;
@@ -612,16 +643,6 @@ static void services_init(void) {
 
     err_code = ble_workout_data_init(&m_workout_data, &workout_data_init);
     APP_ERROR_CHECK(err_code);
-}
-
-/**@brief   Function for starting application timers.
- * @details Timers are run after the scheduler has started.
- */
-static void application_timers_start(void) {
-    // Start application timers.
-    if (pdPASS != xTimerStart(m_battery_timer, OSTIMER_WAIT_FOR_QUEUE)) {
-        APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
-    }
 }
 
 /**@brief Function for handling the Connection Parameters Module.
@@ -670,9 +691,7 @@ static void conn_params_init(void) {
     APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Function for putting the chip into sleep mode.
- *
- * @note This function will not return.
+/**@brief Function for disabling advertising and indcating sleep
  */
 static void sleep_mode_enter(void) {
     ret_code_t err_code;
@@ -680,13 +699,20 @@ static void sleep_mode_enter(void) {
     err_code = bsp_indication_set(BSP_INDICATE_IDLE);
     APP_ERROR_CHECK(err_code);
 
-    // Prepare wakeup buttons.
-    err_code = bsp_btn_ble_sleep_mode_prepare();
+    sd_ble_gap_adv_stop(m_advertising.adv_handle);
+    err_code = bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_RELEASE, BSP_EVENT_WAKEUP);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for enabling and indicating advertising
+ */
+static void sleep_mode_exit(void) {
+    ret_code_t err_code;
+
+    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(err_code);
 
-    // Go to system-off mode (this function will not return; wakeup will cause a
-    // reset).
-    err_code = sd_power_system_off();
+    err_code = bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_RELEASE, BSP_EVENT_SLEEP);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -806,6 +832,11 @@ static void bsp_event_handler(bsp_event_t event) {
     case BSP_EVENT_SLEEP:
         NRF_LOG_INFO("BSP SLEEP");
         sleep_mode_enter();
+        break;
+
+    case BSP_EVENT_WAKEUP:
+        NRF_LOG_INFO("BSP WAKEUP");
+        sleep_mode_exit();
         break;
 
     case BSP_EVENT_DISCONNECT:
@@ -987,7 +1018,7 @@ static void accel_init(void) {
                                          .sda = LIS2DH12_SDA,
                                          .frequency = NRF_DRV_TWI_FREQ_100K,
                                          .interrupt_priority = APP_IRQ_PRIORITY_LOWEST,
-                                         .clear_bus_init = false};
+                                         .clear_bus_init = true};
 
     err_code = nrf_twi_mngr_init(&m_nrf_twi_mngr, &config);
     APP_ERROR_CHECK(err_code);
@@ -1000,16 +1031,15 @@ static void accel_init(void) {
 
 static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) { m_data_ready = true; }
 
-static void empty_gpiote_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {}
+static void charge_inerrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
+    NRF_LOG_INFO("Charging status changed!");
+}
 
-static void gpio_init(void) {
+static void gpiote_init(void) {
     ret_code_t err_code;
 
     err_code = nrf_drv_gpiote_init();
     APP_ERROR_CHECK(err_code);
-
-    nrf_gpio_cfg_output(LIS2DH12_CS);
-    nrf_gpio_pin_set(LIS2DH12_CS);
 
     nrf_drv_gpiote_in_config_t accel_interrupt_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
     err_code = nrf_drv_gpiote_in_init(LIS2DH12_INT1, &accel_interrupt_config, accel_interrupt_handler);
@@ -1017,10 +1047,11 @@ static void gpio_init(void) {
     nrf_drv_gpiote_in_event_enable(LIS2DH12_INT1, true);
 
     nrf_drv_gpiote_in_config_t battery_interrupt_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
-    err_code = nrf_drv_gpiote_in_init(BATTERY_CHARGE_INDICATION, &battery_interrupt_config, empty_gpiote_handler);
+    err_code = nrf_drv_gpiote_in_init(BATTERY_CHARGE_INDICATION, &battery_interrupt_config, charge_inerrupt_handler);
     nrf_drv_gpiote_in_event_enable(BATTERY_CHARGE_INDICATION, true);
 
-    nrf_drv_gpiote_out_config_t battery_charge_indicator_config = GPIOTE_CONFIG_OUT_TASK_TOGGLE(false);
+    nrf_drv_gpiote_out_config_t battery_charge_indicator_config =
+        GPIOTE_CONFIG_OUT_TASK_TOGGLE(!nrf_gpio_pin_read(BATTERY_CHARGE_INDICATION));
     err_code = nrf_drv_gpiote_out_init(LED_GREEN, &battery_charge_indicator_config);
     nrf_drv_gpiote_out_task_enable(LED_GREEN);
 }
@@ -1073,7 +1104,7 @@ int main(void) {
 
     // Initialize modules.
     adc_configure();
-    gpio_init();
+    gpiote_init();
     ppi_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
@@ -1084,13 +1115,12 @@ int main(void) {
     conn_params_init();
     peer_manager_init();
     accel_init();
-    application_timers_start();
 
     // Create a FreeRTOS task for the BLE stack.
     // The task will run advertising_start() before entering its loop.
     nrf_sdh_freertos_init(advertising_start, &erase_bonds);
 
-    NRF_LOG_INFO("HRS FreeRTOS example started.");
+    NRF_LOG_INFO("RepXcel Started.");
     // Start FreeRTOS scheduler.
     vTaskStartScheduler();
 

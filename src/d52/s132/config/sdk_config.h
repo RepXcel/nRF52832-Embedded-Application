@@ -1804,7 +1804,7 @@
 // <196609=> External Full Swing 
 
 #ifndef NRFX_CLOCK_CONFIG_LF_SRC
-#define NRFX_CLOCK_CONFIG_LF_SRC 1
+#define NRFX_CLOCK_CONFIG_LF_SRC 2
 #endif
 
 // <o> NRFX_CLOCK_CONFIG_IRQ_PRIORITY  - Interrupt priority
@@ -4740,7 +4740,7 @@
 // <196609=> External Full Swing 
 
 #ifndef CLOCK_CONFIG_LF_SRC
-#define CLOCK_CONFIG_LF_SRC 1
+#define CLOCK_CONFIG_LF_SRC 2
 #endif
 
 // <q> CLOCK_CONFIG_LF_CAL_ENABLED  - Calibration enable for LF Clock Source

@@ -60,21 +60,21 @@ extern "C" {
 #endif
 
 // LEDs definitions for RepXcel Board
-#define LEDS_NUMBER    3
+#define LEDS_NUMBER    2
 
 // IO board active low leds
 // RepXcel Board does not define LED_START or LED_STOP since the LEDS are not on sequential pins
-#define LED_A        13 //LED A Red
-#define LED_B        12 //LED B Blue
-#define LED_C        11 //LED C Green
+#define LED_A        12 //LED A Blue
+#define LED_B        13 //LED B Red
+// #define LED_C        11 //LED C Green
 
-#define LEDS_ACTIVE_STATE 0
+#define LEDS_ACTIVE_STATE 1
 
-#define LEDS_LIST { LED_A, LED_B, LED_C }
+#define LEDS_LIST { LED_A, LED_B }
 
 #define BSP_LED_0      LED_A
 #define BSP_LED_1      LED_B
-#define BSP_LED_2      LED_C
+// #define BSP_LED_2      LED_C
 
 #define LEDS_INV_MASK  LEDS_MASK
 
