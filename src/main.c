@@ -126,7 +126,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
-#define WORKOUT_DATA_NOTIFICATION_INTERVAL  300                                     /**< Notification update interval */
+#define WORKOUT_DATA_NOTIFICATION_INTERVAL  400                                     /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
 #define MAX_PENDING_TRANSACTIONS            32                                      /**< Maximal number of pending I2C transactions */
