@@ -126,6 +126,7 @@
 
 #define OSTIMER_WAIT_FOR_QUEUE              2                                       /**< Number of ticks to wait for the timer queue to be ready */
 
+#define VELOCITY_QUEUE_LENGTH               1                                       /**< Size of velocity queue */
 #define WORKOUT_DATA_NOTIFICATION_INTERVAL  400                                     /**< Notification update interval */
 
 #define TWI_INSTANCE_ID                     0                                       /**< I2C driver instance */
@@ -195,12 +196,9 @@ LIS2DH12_INSTANCE_DEF(m_lis2dh12, &m_nrf_twi_sensor, LIS2DH12_BASE_ADDRESS_HIGH)
 BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
-static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static uint8_t          m_samples_to_read[3] = {0};                                 /**< Number of samples to read on each axis (x,y,z)*/
-static device_state_t   m_device_state = REST;                                      /**< Device state for rep velocity tracking*/  
-static float            m_velocity_mmps;                                            /**< Current device velocity (magnitude)*/
-static workout_data_t   m_rep_velocity_mmps = {0};                                  /**< Device state for rep velocity tracking*/  
+static QueueHandle_t    m_velocity_queue = NULL; 
 
+static workout_data_t   m_rep_velocity_mmps;                                        /**< Device state for rep velocity tracking*/  
 static nrf_saadc_value_t adc_buf[2];                                                /**< SAADC buffer */
 
 static ble_uuid_t m_adv_uuids[] = {                                                 /**< Universally unique service identifiers. */
@@ -254,39 +252,32 @@ static void accel_off(void) {
 
 /**@brief Use current data in the accel buffer to update the device velocity.
  */
-static void update_velocity(void) {
-    static float velocity_xyz[3] = {0};
+static void update_velocity(lis2dh12_data_t* p_accel_buffer) {
+    static uint8_t m_samples_to_read[3];
+    static float velocity_xyz_mmps[3];
     float accel_magnitude_mmpss[3];
+    float velocity_magnitude_mmps;
 
     for (uint8_t i = 0; i < ACCEl_BUFFER_SIZE; i++) {
-        accel_magnitude_mmpss[0] = MG_TO_MMPSS(m_accel_data[i].x >> 4);
-        accel_magnitude_mmpss[1] = MG_TO_MMPSS(m_accel_data[i].y >> 4);
-        accel_magnitude_mmpss[2] = MG_TO_MMPSS(m_accel_data[i].z >> 4);
+        accel_magnitude_mmpss[0] = MG_TO_MMPSS(p_accel_buffer[i].x >> 4);
+        accel_magnitude_mmpss[1] = MG_TO_MMPSS(p_accel_buffer[i].y >> 4);
+        accel_magnitude_mmpss[2] = MG_TO_MMPSS(p_accel_buffer[i].z >> 4);
         for (uint8_t i = 0; i < sizeof(accel_magnitude_mmpss) / sizeof(float); i++) {
             if (abs(accel_magnitude_mmpss[i]) > ACCEL_VALUE_MINIMUM_MMPSS) {
                 m_samples_to_read[i] = ACCEL_SAMPLES_TO_READ;
             }
             if (m_samples_to_read[i]) {
-                velocity_xyz[i] += accel_magnitude_mmpss[i] * ACCEL_PERIOD;
+                velocity_xyz_mmps[i] += accel_magnitude_mmpss[i] * ACCEL_PERIOD;
             } else {
-                velocity_xyz[i] = 0;
+                velocity_xyz_mmps[i] = 0;
             }
             m_samples_to_read[i] = MAX(m_samples_to_read[i] - 1, 0);
         }
-        m_velocity_mmps = sqrt(velocity_xyz[0] * velocity_xyz[0] + velocity_xyz[1] * velocity_xyz[1] +
-                               velocity_xyz[2] * velocity_xyz[2]);
-        UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
-
-        xTaskNotifyGive(m_rep_velocity_thread);
-        NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity_mmps));
-        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state,
-                     NRF_LOG_FLOAT(m_rep_velocity_mmps.data.velocity));
-        // NRF_LOG_INFO("Rep accel X: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[0]));
-        // NRF_LOG_INFO("Rep accel Y:" NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[1]));
-        // NRF_LOG_INFO("Rep accel Z: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(accel_magnitude_mmpss[2]));
-        // NRF_LOG_INFO("Rep Velocity X: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[0]));
-        // NRF_LOG_INFO("Rep Velocity Y: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[1]));
-        // NRF_LOG_INFO("Rep Velocity Z: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_xyz[2]));
+        velocity_magnitude_mmps =
+            sqrt(velocity_xyz_mmps[0] * velocity_xyz_mmps[0] + velocity_xyz_mmps[1] * velocity_xyz_mmps[1] +
+                 velocity_xyz_mmps[2] * velocity_xyz_mmps[2]);
+        xQueueSend(m_velocity_queue, (void*)&velocity_magnitude_mmps, 0);
+        NRF_LOG_INFO("Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(velocity_magnitude_mmps));
     }
 }
 
@@ -298,11 +289,13 @@ static void update_velocity(void) {
 static void accel_thread(void* arg) {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
+    lis2dh12_data_t accel_buffer[ACCEl_BUFFER_SIZE] = {0};
+
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
+        err_code = lis2dh12_data_read(&m_lis2dh12, NULL, accel_buffer, ACCEl_BUFFER_SIZE);
         APP_ERROR_CHECK(err_code);
-        update_velocity();
+        update_velocity(accel_buffer);
     }
 }
 
@@ -315,44 +308,46 @@ static void accel_thread(void* arg) {
 static void rep_velocity_thread(void* arg) {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
+    device_state_t m_device_state = REST;
     uint32_t sample_count = 0;
-    float temp_rep_velocity = 0;
+    float rep_velocity_candidate_mmps = 0;
+    float velocity_mmps;
+
     for (;;) {
-        if (!ulTaskNotifyTake(pdTRUE, portMAX_DELAY)) {
-            continue;
-        }
+        xQueueReceive(m_velocity_queue, &velocity_mmps, portMAX_DELAY);
         switch (m_device_state) {
         case REST:
-            if (m_velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
-                temp_rep_velocity = 0;
+            if (velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
+                rep_velocity_candidate_mmps = 0;
                 sample_count = 0;
-                temp_rep_velocity = m_velocity_mmps;
                 m_device_state = BEGIN_MOVING;
             }
             break;
 
         case BEGIN_MOVING:
-            if (m_velocity_mmps < REP_VELOCITY_VALUE_MINIMUM_MMPS) {
+            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
+            sample_count++;
+            if (velocity_mmps < REP_VELOCITY_VALUE_MINIMUM_MMPS) {
                 m_device_state = REST;
             } else if (sample_count == REP_VELOCITY_SAMPLES_TILL_MOVING) {
                 m_device_state = MOVING;
             }
-            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity_mmps);
-            sample_count++;
             break;
 
         case MOVING:
-            if (m_velocity_mmps == 0) {
-                m_rep_velocity_mmps.data.velocity = temp_rep_velocity;
+            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
+            if (velocity_mmps == 0) {
+                m_rep_velocity_mmps.data.velocity = rep_velocity_candidate_mmps;
                 m_rep_velocity_mmps.data.timestamp += 1;
                 m_device_state = REST;
             }
-            temp_rep_velocity = MAX(temp_rep_velocity, m_velocity_mmps);
             break;
 
         default:
             break;
         }
+        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state,
+                     NRF_LOG_FLOAT(m_rep_velocity_mmps.data.velocity));
     }
 }
 
@@ -477,6 +472,10 @@ static void timers_init(void) {
     m_battery_timer =
         xTimerCreate("BATT", BATTERY_LEVEL_MEAS_INTERVAL, pdTRUE, NULL, battery_level_meas_timeout_handler);
 }
+
+/**@brief Initialzes FreeRTOS queues
+ */
+static void queues_init(void) { m_velocity_queue = xQueueCreate(VELOCITY_QUEUE_LENGTH, sizeof(float)); }
 
 /**@brief Function for the GAP initialization.
  *
@@ -1110,6 +1109,7 @@ int main(void) {
     gpiote_init();
     ppi_init();
     timers_init();
+    queues_init();
     buttons_leds_init(&erase_bonds);
     gap_params_init();
     gatt_init();
