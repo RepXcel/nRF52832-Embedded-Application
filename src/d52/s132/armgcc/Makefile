@@ -318,7 +318,7 @@ nrf52832_xxaa: ASMFLAGS += -D__STACK_SIZE=2048
 LIB_FILES += -lc -lnosys -lm
 
 
-.PHONY: default release flash_dev help
+.PHONY: default help
 
 # Default target - first one defined
 default: nrf52832_xxaa

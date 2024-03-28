@@ -195,8 +195,7 @@ BLE_WORKOUT_DATA_DEF(m_workout_data);
 
 static uint16_t         m_conn_handle = BLE_CONN_HANDLE_INVALID;                    /**< Handle of the current connection. */
 static lis2dh12_data_t  m_accel_data[ACCEl_BUFFER_SIZE] = {0};                      /**< Buffer for accel samples */
-static uint8_t          m_samples_to_read[3] = {0};      
-static bool             m_data_ready = false;                               /**< Number of samples to read on each axis (x,y,z)*/
+static uint8_t          m_samples_to_read[3] = {0};                                 /**< Number of samples to read on each axis (x,y,z)*/
 static device_state_t   m_device_state = REST;                                      /**< Device state for rep velocity tracking*/  
 static float            m_velocity_mmps;                                            /**< Current device velocity (magnitude)*/
 static workout_data_t   m_rep_velocity_mmps = {0};                                  /**< Device state for rep velocity tracking*/  
@@ -276,6 +275,8 @@ static void update_velocity(void) {
         m_velocity_mmps = sqrt(velocity_xyz[0] * velocity_xyz[0] + velocity_xyz[1] * velocity_xyz[1] +
                                velocity_xyz[2] * velocity_xyz[2]);
         UNUSED_RETURN_VALUE(vTaskResume(m_rep_velocity_thread));
+
+        xTaskNotifyGive(m_rep_velocity_thread);
         NRF_LOG_INFO("Rep Velocity: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(m_velocity_mmps));
         NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state,
                      NRF_LOG_FLOAT(m_rep_velocity_mmps.data.velocity));
@@ -297,13 +298,10 @@ static void accel_thread(void* arg) {
     UNUSED_PARAMETER(arg);
     ret_code_t err_code;
     for (;;) {
-        __WFI();
-        if (m_data_ready) {
-            err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
-            APP_ERROR_CHECK(err_code);
-            update_velocity();
-            m_data_ready = false;
-        }
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        err_code = lis2dh12_data_read(&m_lis2dh12, NULL, m_accel_data, ACCEl_BUFFER_SIZE);
+        APP_ERROR_CHECK(err_code);
+        update_velocity();
     }
 }
 
@@ -319,6 +317,9 @@ static void rep_velocity_thread(void* arg) {
     uint32_t sample_count = 0;
     float temp_rep_velocity = 0;
     for (;;) {
+        if(!ulTaskNotifyTake(pdTRUE, portMAX_DELAY)){
+            continue;
+        }
         switch (m_device_state) {
         case REST:
             if (m_velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
@@ -351,7 +352,6 @@ static void rep_velocity_thread(void* arg) {
         default:
             break;
         }
-        vTaskSuspend(NULL);
     }
 }
 
@@ -697,7 +697,7 @@ static void sleep_mode_enter(void) {
     ret_code_t err_code;
 
     err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-    APP_ERROR_CHECK(err_code);
+    APP_ERROR_CHECK(1);
 
     sd_ble_gap_adv_stop(m_advertising.adv_handle);
     err_code = bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_RELEASE, BSP_EVENT_WAKEUP);
@@ -1029,7 +1029,11 @@ static void accel_init(void) {
     accel_off();
 }
 
-static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) { m_data_ready = true; }
+static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) { 
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(m_accel_thread, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+ }
 
 static void charge_inerrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
     NRF_LOG_INFO("Charging status changed!");
