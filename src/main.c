@@ -346,8 +346,8 @@ static void rep_velocity_thread(void* arg) {
         default:
             break;
         }
-        NRF_LOG_INFO("Rep state %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state,
-                     NRF_LOG_FLOAT(m_rep_velocity_mmps.data.velocity));
+        NRF_LOG_INFO("Rep state %d, Timestamp: %d, Rep Velocity: " NRF_LOG_FLOAT_MARKER, m_device_state,
+                     m_rep_velocity_mmps.data.timestamp, NRF_LOG_FLOAT(m_rep_velocity_mmps.data.velocity));
     }
 }
 
