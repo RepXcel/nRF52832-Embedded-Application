@@ -534,7 +534,7 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
 
-        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_1);
+        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_USER_STATE_1);
         APP_ERROR_CHECK(err_code);
         accel_on();
         memset(&m_rep_velocity_mmps, 0, sizeof(workout_data_t));
@@ -546,7 +546,7 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
 
-        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_0);
+        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_CONNECTED);
         APP_ERROR_CHECK(err_code);
         accel_off();
         break;
@@ -560,9 +560,6 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
         if (pdPASS != xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE)) {
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
-
-        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_0);
-        APP_ERROR_CHECK(err_code);
         accel_off();
         break;
 
@@ -732,7 +729,7 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt) {
     switch (ble_adv_evt) {
     case BLE_ADV_EVT_FAST:
         NRF_LOG_INFO("Fast advertising.");
-        err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
+        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_ADVERTISING);
         APP_ERROR_CHECK(err_code);
         break;
 
