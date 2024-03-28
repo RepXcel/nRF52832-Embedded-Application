@@ -55,7 +55,6 @@
 #include "FreeRTOS.h"
 #include "app_error.h"
 #include "app_timer.h"
-#include "app_util.h"
 #include "ble.h"
 #include "ble_advdata.h"
 #include "ble_advertising.h"
@@ -104,11 +103,6 @@
 
 #define APP_ADV_INTERVAL                    300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 #define APP_ADV_DURATION                    18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
-
-#define BATTERY_LEVEL_MEAS_INTERVAL         5000                                    /**< Battery level measurement interval (ms). */
-#define MIN_BATTERY_LEVEL                   81                                      /**< Minimum simulated battery level. */
-#define MAX_BATTERY_LEVEL                   100                                     /**< Maximum simulated battery level. */
-#define BATTERY_LEVEL_INCREMENT             1                                       /**< Increment between each simulated battery level measurement. */
 
 #define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(100, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.10 seconds). */
 #define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(300, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.30 second). */
@@ -171,10 +165,17 @@
 #define ADC_RESULT_IN_MILLI_VOLTS(ADC_VALUE)\
         ((((ADC_VALUE) * ADC_REF_VOLTAGE_IN_MILLIVOLTS) / ADC_RES_10BIT) * ADC_PRE_SCALING_COMPENSATION)
 
+#define MILLIVOLTS_TO_PERCENT(MV)\
+        MV >= BATTERY_MAX_VOLTAGE_MILLIVOLTS ? 100 : \
+        MV <= BATTERY_MIN_VOLTAGE_MILLIVOLTS ? 0 : \
+        (100 - (100 * (BATTERY_MAX_VOLTAGE_MILLIVOLTS - MV) / (BATTERY_MAX_VOLTAGE_MILLIVOLTS - BATTERY_MIN_VOLTAGE_MILLIVOLTS)))
+
 #define ADC_REF_VOLTAGE_IN_MILLIVOLTS   600                                         /**< Reference voltage (in milli volts) used by ADC while doing conversion. */
 #define ADC_PRE_SCALING_COMPENSATION    6                                           /**< The ADC is configured to use VDD with 1/3 prescaling as input. And hence the result of conversion is to be multiplied by 3 to get the actual value of the battery voltage.*/
-#define DIODE_FWD_VOLT_DROP_MILLIVOLTS  270                                         /**< Typical forward voltage drop of the diode . */
 #define ADC_RES_10BIT                   1024                                        /**< Maximum digital value for 10-bit ADC conversion. */
+#define BATTERY_MAX_VOLTAGE_MILLIVOLTS  2050                                        /**< VBAT_MEAS Reading for 100% battery */
+#define BATTERY_MIN_VOLTAGE_MILLIVOLTS  1650                                        /**< VBAT_MEAS Reading for 0% battery */
+#define BATTERY_LEVEL_MEAS_INTERVAL     1000                                        /**< Battery level measurement interval (ms). */
 
 typedef enum                                                                        /**< Device states for rep veloicty state machine */
 {
@@ -317,7 +318,7 @@ static void rep_velocity_thread(void* arg) {
     uint32_t sample_count = 0;
     float temp_rep_velocity = 0;
     for (;;) {
-        if(!ulTaskNotifyTake(pdTRUE, portMAX_DELAY)){
+        if (!ulTaskNotifyTake(pdTRUE, portMAX_DELAY)) {
             continue;
         }
         switch (m_device_state) {
@@ -408,15 +409,15 @@ void saadc_event_handler(nrf_drv_saadc_evt_t const* p_event) {
         err_code = nrf_drv_saadc_buffer_convert(p_event->data.done.p_buffer, 1);
         APP_ERROR_CHECK(err_code);
 
-        batt_lvl_in_milli_volts = ADC_RESULT_IN_MILLI_VOLTS(adc_result) + DIODE_FWD_VOLT_DROP_MILLIVOLTS;
-        percentage_batt_lvl = battery_level_in_percent(batt_lvl_in_milli_volts);
+        batt_lvl_in_milli_volts = ADC_RESULT_IN_MILLI_VOLTS(adc_result);
+        percentage_batt_lvl = MILLIVOLTS_TO_PERCENT(batt_lvl_in_milli_volts);
 
         err_code = ble_bas_battery_level_update(&m_bas, percentage_batt_lvl, BLE_CONN_HANDLE_ALL);
         if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) &&
             (err_code != NRF_ERROR_BUSY) && (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)) {
             APP_ERROR_HANDLER(err_code);
         }
-        NRF_LOG_INFO("Battery percent: %d", percentage_batt_lvl);
+        NRF_LOG_INFO("Millivolts: %d | Battery percent: %d", batt_lvl_in_milli_volts, percentage_batt_lvl);
     }
 }
 
@@ -426,7 +427,7 @@ static void adc_configure(void) {
     ret_code_t err_code = nrf_drv_saadc_init(NULL, saadc_event_handler);
     APP_ERROR_CHECK(err_code);
 
-    nrf_saadc_channel_config_t config = NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_VDD);
+    nrf_saadc_channel_config_t config = NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(NRF_SAADC_INPUT_AIN3);
     err_code = nrf_drv_saadc_channel_init(0, &config);
     APP_ERROR_CHECK(err_code);
 
@@ -545,7 +546,6 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
 
-        // err_code = bsp_indication_set(BSP_INDICATE_IDLE);
         err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_0);
         APP_ERROR_CHECK(err_code);
         accel_off();
@@ -560,6 +560,9 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
         if (pdPASS != xTimerStop(m_ble_workout_data_notif_timer, OSTIMER_WAIT_FOR_QUEUE)) {
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
+
+        err_code = bsp_indication_set(BSP_INDICATE_USER_STATE_0);
+        APP_ERROR_CHECK(err_code);
         accel_off();
         break;
 
@@ -697,7 +700,7 @@ static void sleep_mode_enter(void) {
     ret_code_t err_code;
 
     err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-    APP_ERROR_CHECK(1);
+    APP_ERROR_CHECK(err_code);
 
     sd_ble_gap_adv_stop(m_advertising.adv_handle);
     err_code = bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_RELEASE, BSP_EVENT_WAKEUP);
@@ -1029,11 +1032,11 @@ static void accel_init(void) {
     accel_off();
 }
 
-static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) { 
+static void accel_interrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     vTaskNotifyGiveFromISR(m_accel_thread, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
- }
+}
 
 static void charge_inerrupt_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
     NRF_LOG_INFO("Charging status changed!");
@@ -1099,7 +1102,6 @@ int main(void) {
         pdPASS != xTaskCreate(rep_velocity_thread, "rep_velocity", 256, NULL, 2, &m_rep_velocity_thread)) {
         APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
     }
-
     // Activate deep sleep mode.
     SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
 
