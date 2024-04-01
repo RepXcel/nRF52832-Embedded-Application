@@ -222,6 +222,13 @@ static TaskHandle_t m_accel_thread;                                             
 static TaskHandle_t m_rep_velocity_thread;                                          /**< Definition of Per Rep Velocity thread. */
 /* clang-format on */
 
+/**
+ * @brief Idle hook for FreeRTOS to put device in low power mode
+ */
+void vApplicationIdleHook(void){
+    nrf_pwr_mgmt_run();
+}
+
 static void advertising_start(void* p_erase_bonds);
 
 /**
