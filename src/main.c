@@ -169,14 +169,14 @@
 #define MILLIVOLTS_TO_PERCENT(MV)\
         MV >= BATTERY_MAX_VOLTAGE_MILLIVOLTS ? 100 : \
         MV <= BATTERY_MIN_VOLTAGE_MILLIVOLTS ? 0 : \
-        (100 - (100 * (BATTERY_MAX_VOLTAGE_MILLIVOLTS - MV) / (BATTERY_MAX_VOLTAGE_MILLIVOLTS - BATTERY_MIN_VOLTAGE_MILLIVOLTS)))
+        (int)(100 - (100 * (float)(BATTERY_MAX_VOLTAGE_MILLIVOLTS - MV) / (float)(BATTERY_MAX_VOLTAGE_MILLIVOLTS - BATTERY_MIN_VOLTAGE_MILLIVOLTS)))
 
 #define ADC_REF_VOLTAGE_IN_MILLIVOLTS   600                                         /**< Reference voltage (in milli volts) used by ADC while doing conversion. */
 #define ADC_PRE_SCALING_COMPENSATION    6                                           /**< The ADC is configured to use VDD with 1/3 prescaling as input. And hence the result of conversion is to be multiplied by 3 to get the actual value of the battery voltage.*/
 #define ADC_RES_10BIT                   1024                                        /**< Maximum digital value for 10-bit ADC conversion. */
 #define BATTERY_MAX_VOLTAGE_MILLIVOLTS  2050                                        /**< VBAT_MEAS Reading for 100% battery */
 #define BATTERY_MIN_VOLTAGE_MILLIVOLTS  1650                                        /**< VBAT_MEAS Reading for 0% battery */
-#define BATTERY_LEVEL_MEAS_INTERVAL     1000                                        /**< Battery level measurement interval (ms). */
+#define BATTERY_LEVEL_MEAS_INTERVAL     5000                                        /**< Battery level measurement interval (ms). */
 
 typedef enum                                                                        /**< Device states for rep veloicty state machine */
 {
@@ -533,7 +533,8 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
 
-        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_USER_STATE_1);
+        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_USER_STATE_1) ||
+                   bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_LONG_PUSH, BSP_EVENT_DEFAULT);
         APP_ERROR_CHECK(err_code);
         accel_on();
         memset(&m_rep_velocity_mmps, 0, sizeof(workout_data_t));
@@ -545,7 +546,8 @@ static void on_workout_data_evt(ble_workout_data_t* p_workout_data, ble_workout_
             APP_ERROR_HANDLER(NRF_ERROR_NO_MEM);
         }
 
-        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_CONNECTED);
+        err_code = bsp_indication_set(BSP_INDICATE_IDLE) || bsp_indication_set(BSP_INDICATE_CONNECTED) ||
+                   bsp_event_to_button_action_assign(BUTTON_SLEEPWAKE, BSP_BUTTON_ACTION_LONG_PUSH, BSP_EVENT_SLEEP);
         APP_ERROR_CHECK(err_code);
         accel_off();
         break;
