@@ -176,7 +176,7 @@
 #define ADC_RES_10BIT                   1024                                        /**< Maximum digital value for 10-bit ADC conversion. */
 #define BATTERY_MAX_VOLTAGE_MILLIVOLTS  2050                                        /**< VBAT_MEAS Reading for 100% battery */
 #define BATTERY_MIN_VOLTAGE_MILLIVOLTS  1650                                        /**< VBAT_MEAS Reading for 0% battery */
-#define BATTERY_LEVEL_MEAS_INTERVAL     5000                                        /**< Battery level measurement interval (ms). */
+#define BATTERY_LEVEL_MEAS_INTERVAL     1000                                        /**< Battery level measurement interval (ms). */
 
 typedef enum                                                                        /**< Device states for rep veloicty state machine */
 {
@@ -225,9 +225,7 @@ static TaskHandle_t m_rep_velocity_thread;                                      
 /**
  * @brief Idle hook for FreeRTOS to put device in low power mode
  */
-void vApplicationIdleHook(void){
-    nrf_pwr_mgmt_run();
-}
+void vApplicationIdleHook(void) { nrf_pwr_mgmt_run(); }
 
 static void advertising_start(void* p_erase_bonds);
 
@@ -317,7 +315,7 @@ static void rep_velocity_thread(void* arg) {
     ret_code_t err_code;
     device_state_t m_device_state = REST;
     uint32_t sample_count = 0;
-    float rep_velocity_candidate_mmps = 0;
+    float rep_velocity_sum_mmps = 0;
     float velocity_mmps;
 
     for (;;) {
@@ -325,14 +323,14 @@ static void rep_velocity_thread(void* arg) {
         switch (m_device_state) {
         case REST:
             if (velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
-                rep_velocity_candidate_mmps = 0;
+                rep_velocity_sum_mmps = 0;
                 sample_count = 0;
                 m_device_state = BEGIN_MOVING;
             }
             break;
 
         case BEGIN_MOVING:
-            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
+            rep_velocity_sum_mmps += velocity_mmps;
             sample_count++;
             if (velocity_mmps < REP_VELOCITY_VALUE_MINIMUM_MMPS) {
                 m_device_state = REST;
@@ -342,9 +340,11 @@ static void rep_velocity_thread(void* arg) {
             break;
 
         case MOVING:
-            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
-            if (velocity_mmps == 0) {
-                m_rep_velocity_mmps.data.velocity = rep_velocity_candidate_mmps;
+            if (velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
+                rep_velocity_sum_mmps += velocity_mmps;
+                sample_count++;
+            } else if (velocity_mmps == 0) {
+                m_rep_velocity_mmps.data.velocity = rep_velocity_sum_mmps / sample_count;
                 m_rep_velocity_mmps.data.timestamp += 1;
                 m_device_state = REST;
             }
