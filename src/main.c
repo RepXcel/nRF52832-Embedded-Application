@@ -315,7 +315,7 @@ static void rep_velocity_thread(void* arg) {
     ret_code_t err_code;
     device_state_t m_device_state = REST;
     uint32_t sample_count = 0;
-    float rep_velocity_sum_mmps = 0;
+    float rep_velocity_candidate_mmps = 0;
     float velocity_mmps;
 
     for (;;) {
@@ -323,14 +323,14 @@ static void rep_velocity_thread(void* arg) {
         switch (m_device_state) {
         case REST:
             if (velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
-                rep_velocity_sum_mmps = 0;
+                rep_velocity_candidate_mmps = 0;
                 sample_count = 0;
                 m_device_state = BEGIN_MOVING;
             }
             break;
 
         case BEGIN_MOVING:
-            rep_velocity_sum_mmps += velocity_mmps;
+            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
             sample_count++;
             if (velocity_mmps < REP_VELOCITY_VALUE_MINIMUM_MMPS) {
                 m_device_state = REST;
@@ -340,11 +340,9 @@ static void rep_velocity_thread(void* arg) {
             break;
 
         case MOVING:
-            if (velocity_mmps >= REP_VELOCITY_VALUE_MINIMUM_MMPS) {
-                rep_velocity_sum_mmps += velocity_mmps;
-                sample_count++;
-            } else if (velocity_mmps == 0) {
-                m_rep_velocity_mmps.data.velocity = rep_velocity_sum_mmps / sample_count;
+            rep_velocity_candidate_mmps = MAX(rep_velocity_candidate_mmps, velocity_mmps);
+            if (velocity_mmps == 0) {
+                m_rep_velocity_mmps.data.velocity = rep_velocity_candidate_mmps;
                 m_rep_velocity_mmps.data.timestamp += 1;
                 m_device_state = REST;
             }
@@ -417,7 +415,7 @@ void saadc_event_handler(nrf_drv_saadc_evt_t const* p_event) {
         err_code = ble_bas_battery_level_update(&m_bas, percentage_batt_lvl, BLE_CONN_HANDLE_ALL);
         if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) &&
             (err_code != NRF_ERROR_BUSY) && (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)) {
-            APP_ERROR_HANDLER(err_code);
+            APP_ERROR_HANDLER(err_code); 
         }
         NRF_LOG_INFO("Millivolts: %d | Battery percent: %d", batt_lvl_in_milli_volts, percentage_batt_lvl);
     }
@@ -990,7 +988,7 @@ static void advertising_start(void* p_erase_bonds) {
 static void logger_thread(void* arg) {
     UNUSED_PARAMETER(arg);
 
-    while (1) {
+    for (;;) {
         NRF_LOG_FLUSH();
 
         vTaskSuspend(NULL); // Suspend myself
